@@ -1,0 +1,16 @@
+{
+  "name": "basta-job-assistant",
+  "version": "1.0.0",
+  "description": "Chrome extension for collecting and analyzing job information",
+  "scripts": {
+    "build": "node build.js",
+    "prebuild": "echo 'Running pre-build checks...'"
+  },
+  "keywords": [
+    "chrome-extension",
+    "job-assistant"
+  ],
+  "author": "",
+  "license": "ISC"
+}
+
