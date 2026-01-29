@@ -220,24 +220,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'getJobInfo') {
-    // Get job info for the current active tab
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length > 0) {
-        const activeTabId = tabs[0].id;
-        chrome.storage.local.get(['jobInfoByTab', 'lastJobInfo'], (result) => {
-          const jobInfoByTab = result.jobInfoByTab || {};
-          const tabJobInfo = jobInfoByTab[activeTabId];
-          // Return tab-specific info if available, otherwise fallback to lastJobInfo
-          sendResponse(tabJobInfo || result.lastJobInfo || null);
-        });
-      } else {
-        // No active tab, return lastJobInfo
-        chrome.storage.local.get(['lastJobInfo'], (result) => {
-          sendResponse(result.lastJobInfo || null);
-        });
-      }
-    });
+    // Use sender tab when message is from content script (so we get this tab's job info)
+    const tabId = sender.tab ? sender.tab.id : null;
+    function respondWithJobInfo(targetTabId) {
+      chrome.storage.local.get(['jobInfoByTab', 'lastJobInfo'], (result) => {
+        const jobInfoByTab = result.jobInfoByTab || {};
+        const tabJobInfo = targetTabId ? jobInfoByTab[targetTabId] : null;
+        sendResponse(tabJobInfo || result.lastJobInfo || null);
+      });
+    }
+    if (tabId) {
+      respondWithJobInfo(tabId);
+    } else {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        respondWithJobInfo(tabs.length > 0 ? tabs[0].id : null);
+      });
+    }
     return true; // Indicates we will send a response asynchronously
+  }
+
+  if (request.action === 'getMobilityForCurrentTab') {
+    const tabId = sender.tab ? sender.tab.id : null;
+    if (!tabId) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const targetTabId = tabs.length > 0 ? tabs[0].id : null;
+        chrome.storage.local.get(['jobMobilityByTab'], (result) => {
+          const mobility = targetTabId ? (result.jobMobilityByTab || {})[targetTabId] : null;
+          sendResponse(mobility || null);
+        });
+      });
+    } else {
+      chrome.storage.local.get(['jobMobilityByTab'], (result) => {
+        const mobility = (result.jobMobilityByTab || {})[tabId] || null;
+        sendResponse(mobility);
+      });
+    }
+    return true;
   }
 
   if (request.action === 'clearJobInfo') {

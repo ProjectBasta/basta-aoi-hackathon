@@ -14,6 +14,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const loginButton = document.getElementById('loginButton');
   const headerUserInfo = document.getElementById('headerUserInfo');
   const headerUserName = document.getElementById('headerUserName');
+  const sidebarToggle = document.getElementById('sidebarToggle');
 
   // Check authentication status on load
   checkAuthStatus();
@@ -173,8 +174,36 @@ document.addEventListener('DOMContentLoaded', () => {
   function showJobInfoScreen() {
     loginScreen.style.display = 'none';
     jobInfoScreen.style.display = 'block';
+    // Load sidebar toggle state
+    chrome.storage.local.get(['sidebarVisible'], (result) => {
+      if (sidebarToggle) {
+        sidebarToggle.checked = result.sidebarVisible !== false;
+      }
+    });
     // Load job info when showing the screen
     loadJobInfo();
+  }
+
+  // Sidebar toggle: save preference, tell content script, close popup when turning sidebar ON
+  if (sidebarToggle) {
+    sidebarToggle.addEventListener('change', async () => {
+      const visible = sidebarToggle.checked;
+      await chrome.storage.local.set({ sidebarVisible: visible });
+
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      if (tab?.id) {
+        try {
+          await chrome.tabs.sendMessage(tab.id, { action: 'setSidebarVisible', visible });
+        } catch (e) {
+          // Tab may not have content script (e.g. not a job board)
+        }
+      }
+
+      // Close popup when sidebar is turned ON so user can see the page with the sidebar
+      if (visible) {
+        window.close();
+      }
+    });
   }
 
   function showLoginError(message) {
@@ -282,16 +311,16 @@ document.addEventListener('DOMContentLoaded', () => {
 
   function displayJobInfo(jobData, mobilityData) {
     const companyName = escapeHtml(jobData.companyName || 'Not available');
-    const companyLink = jobData.companyName 
-      ? `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(jobData.companyName)}`
-      : '';
+    const companyLink = companySearchUrl(jobData.companyName);
+    const overallBadgeHtml = mobilityData?.job_mobility ? renderBadgeHtml(mobilityData.job_mobility.overall_badge) : renderBadgeHtml(null);
 
     let html = `
       <div class="job-field">
         <div class="job-field-label">Company</div>
-        <div class="job-field-value">
-          ${companyLink ? `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>` : companyName}
-      </div>
+        <div class="job-field-value job-field-company-with-badge">
+          ${companyLink ? `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>` : companyName}
+          ${overallBadgeHtml}
+        </div>
       </div>
       <div class="job-field">
         <div class="job-field-label">Title</div>
@@ -303,7 +332,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (mobilityData && mobilityData.job_mobility) {
       // Show available data even if status is in_progress
       // Pass the full mobilityData object, function will extract job_mobility
-      html += createMobilityHTML(mobilityData, companyName, companyLink);
+      html += createMobilityHTML(mobilityData, companyName, companyLink, jobData.compensation);
       
       // Show loading indicator if still in progress
       if (mobilityData.job_mobility.status === 'in_progress') {
@@ -331,7 +360,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // The API call should only happen when the page is first loaded/refreshed
   }
 
-  function createMobilityHTML(mobilityData, companyName, companyLink) {
+  function createMobilityHTML(mobilityData, companyName, companyLink, pageCompensation) {
     // Handle both direct job_mobility object and nested structure
     const data = mobilityData.job_mobility || mobilityData || {};
     let html = '';
@@ -348,7 +377,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.skills && data.skills.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Required: Skills</div>
+          <div class="job-field-label">Skills that will help you succeed in this role</div>
           <div class="job-field-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
         </div>
       `;
@@ -362,27 +391,30 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
 
-    // Always show Compensation (even if empty)
+    // Always show Compensation: fetched page compensation + single comparison icon (no wage data)
     const wage = data.wage || {};
-    const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
-    const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
-    const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
+    const pageCompDisplay = formatCompensationForDisplay(pageCompensation || '');
+    const pageCompText = pageCompDisplay ? escapeHtml(pageCompDisplay) : '';
+    const compIndicator = getCompensationIndicator(pageCompensation, wage);
+    const compIndicatorHtml = renderCompensationIndicatorHtml(compIndicator);
     html += `
       <div class="job-field">
         <div class="job-field-label">Compensation:</div>
-        <div class="job-field-value">Low${low}  Median ${median}  High ${high}</div>
+        <div class="job-field-value basta-compensation-row">
+          <span class="basta-compensation-text">${pageCompText || 'Not on page'}</span>
+          ${compIndicatorHtml}
+        </div>
       </div>
     `;
 
-    // Always show Badges (even if empty)
+    // Always show What this company is known for (badges; overall is next to company name)
     html += `
       <div class="job-field">
-        <div class="job-field-label">Badges:</div>
-        <div class="job-field-value">
-          Overall ${escapeHtml(data.overall_badge || 'N/A')}<br>
-          Early Career ${escapeHtml(data.badge_early_career || 'N/A')}<br>
-          Growth ${escapeHtml(data.badge_growth || 'N/A')}<br>
-          Stability ${escapeHtml(data.badge_stability || 'N/A')}
+        <div class="job-field-label">What this company is known for</div>
+        <div class="job-field-value basta-badges-wrap">
+          <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
+          <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
+          <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
         </div>
       </div>
     `;
@@ -394,8 +426,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="job-field-value">${data.badge_early_career_company && data.badge_early_career_company.length > 0
           ? data.badge_early_career_company.map(c => {
               const companyName = escapeHtml(c);
-              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-              return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+              const companyLink = companySearchUrl(c);
+              return `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>`;
             }).join(', ')
           : 'Not available'}</div>
       </div>
@@ -408,8 +440,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="job-field-value">${data.badge_growth_company && data.badge_growth_company.length > 0
           ? data.badge_growth_company.map(c => {
               const companyName = escapeHtml(c);
-              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-              return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+              const companyLink = companySearchUrl(c);
+              return `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>`;
             }).join(', ')
           : 'Not available'}</div>
       </div>
@@ -422,8 +454,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="job-field-value">${data.badge_stability_company && data.badge_stability_company.length > 0
           ? data.badge_stability_company.map(c => {
               const companyName = escapeHtml(c);
-              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-              return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+              const companyLink = companySearchUrl(c);
+              return `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>`;
             }).join(', ')
           : 'Not available'}</div>
       </div>
@@ -451,9 +483,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.works && data.works.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">What works well !</div>
+          <div class="job-field-label">What works well:</div>
           <div class="job-field-value">
-            <ul style="margin: 8px 0; padding-left: 20px;">
+            <ul class="job-field-list">
               ${data.works.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
             </ul>
           </div>
@@ -464,9 +496,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.consider && data.consider.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Things to consider</div>
+          <div class="job-field-label">Things to consider:</div>
           <div class="job-field-value">
-            <ul style="margin: 8px 0; padding-left: 20px;">
+            <ul class="job-field-list">
               ${data.consider.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
             </ul>
           </div>
@@ -502,6 +534,76 @@ document.addEventListener('DOMContentLoaded', () => {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+  }
+
+  // Build LinkedIn company search URL: spaces in company name become underscores
+  function companySearchUrl(companyName) {
+    if (!companyName || typeof companyName !== 'string') return '';
+    const slug = companyName.trim().replace(/\s+/g, '_');
+    return `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(slug)}`;
+  }
+
+  // Badge config for Platinum / Gold / N/A with tooltips
+  function getBadgeConfig(value) {
+    const v = (value || '').toString().trim().toLowerCase();
+    if (v === 'platinum') return { type: 'platinum', label: 'Platinum', tooltip: 'Top 20% (80–100th percentile)' };
+    if (v === 'gold') return { type: 'gold', label: 'Gold', tooltip: '60–80th percentile' };
+    return { type: 'na', label: 'N/A', tooltip: 'Below 60th percentile' };
+  }
+
+  function renderBadgeHtml(value) {
+    const cfg = getBadgeConfig(value);
+    const tip = escapeHtml(cfg.tooltip);
+    return `<span class="basta-badge basta-badge-${cfg.type}" title="${tip}"><span class="basta-badge-inner">${escapeHtml(cfg.label)}</span><span class="basta-badge-tooltip">${tip}</span></span>`;
+  }
+
+  function parseCompensationToNumber(str) {
+    if (!str || typeof str !== 'string') return null;
+    const s = str.trim();
+    const match = s.match(/\$?\s*([\d,]+)\s*([KMB])?/i);
+    if (!match) return null;
+    let num = parseInt(match[1].replace(/,/g, ''), 10);
+    if (isNaN(num)) return null;
+    const suffix = (match[2] || '').toUpperCase();
+    if (suffix === 'K') num *= 1000;
+    else if (suffix === 'M') num *= 1000000;
+    else if (suffix === 'B') num *= 1000000000;
+    if (/\d+\s*\/\s*(hr|hour)|\s+per\s+(hour|hr)/i.test(s)) num = Math.round(num * 2080);
+    return num;
+  }
+
+  function formatCompensationForDisplay(str) {
+    if (!str || typeof str !== 'string') return '';
+    const s = str.trim();
+    if (!s) return '';
+    const isHourly = /\d+\s*\/\s*(hr|hour)|\s+per\s+(hour|hr)/i.test(s);
+    if (!isHourly) return s;
+    const yearly = parseCompensationToNumber(str);
+    if (yearly == null) return s;
+    return s + ' (~$' + yearly.toLocaleString() + '/yr)';
+  }
+
+  function getCompensationIndicator(pageCompensation, wage) {
+    const pageLow = parseCompensationToNumber(pageCompensation);
+    const apiLow = (wage && (wage.percentile_25 != null)) ? wage.percentile_25 : (wage && wage.median != null ? wage.median : null);
+    if (pageLow == null || apiLow == null) return null;
+    const tolerance = apiLow * 0.05;
+    if (pageLow > apiLow + tolerance) return 'higher';
+    if (pageLow < apiLow - tolerance) return 'lower';
+    return 'average';
+  }
+
+  function renderCompensationIndicatorHtml(indicator) {
+    if (!indicator || !['higher', 'average', 'lower'].includes(indicator)) return '';
+    const tips = {
+      higher: 'Higher than average for this job title',
+      average: 'Average for this job title',
+      lower: 'Lower than average for this job title'
+    };
+    const tip = escapeHtml(tips[indicator]);
+    const svgPath = indicator === 'higher' ? 'M7 14l5-5 5 5z' : indicator === 'lower' ? 'M7 10l5 5 5-5z' : 'M10 6l6 6-6 6V6z';
+    const cls = 'basta-comp-indicator basta-comp-' + indicator;
+    return `<span class="${cls}" title="${tip}" role="img" aria-label="${tips[indicator]}"><span class="basta-comp-indicator-tooltip">${tip}</span><svg width="2em" height="2em" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="${svgPath}"/></svg></span>`;
   }
 
   // Listen for storage changes to automatically update when new job info is collected for current tab
