@@ -740,13 +740,18 @@
       ? `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(jobData.companyName)}`
       : '';
 
-    // Show company and title immediately, rest with spinner if mobility data is loading
-    const showSpinner = !mobilityData || mobilityData.status === 'in_progress';
-    
+    // Show available data even when status is in_progress
     let mobilityHTML = '';
-    if (mobilityData && mobilityData.status === 'completed') {
+    if (mobilityData && mobilityData.job_mobility) {
+      // Show available data even if status is in_progress
       mobilityHTML = createMobilityHTML(mobilityData, companyName, companyLink);
-    } else if (showSpinner) {
+      
+      // Show loading indicator if still in progress
+      if (mobilityData.job_mobility.status === 'in_progress') {
+        mobilityHTML += '<div class="basta-sidebar-spinner">Loading more data...</div>';
+      }
+    } else if (!mobilityData || (mobilityData.status && mobilityData.status === 'in_progress')) {
+      // Show spinner only if no data at all
       mobilityHTML = '<div class="basta-sidebar-spinner">Loading job mobility data...</div>';
     }
 

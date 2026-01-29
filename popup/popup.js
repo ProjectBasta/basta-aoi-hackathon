@@ -71,14 +71,34 @@ document.addEventListener('DOMContentLoaded', () => {
       // Convert expiry from seconds to milliseconds for Date comparison
       const expirationTime = expiry * 1000;
 
+      // Extract user_id and response_id from login response
+      // user_id is at responseData.data.user.id
+      // response_id is at responseData.data.user.response_id
+      const userId = responseData.data?.user?.id || null;
+      const responseId = responseData.data?.user?.response_id || null;
+
       // Store token, expiration, and user info
       await chrome.storage.local.set({
         authToken: accessToken,
         tokenExpiration: expirationTime,
         username: username,
         userFirstName: responseData.data.user?.first_name || '',
-        userEmail: responseData.data.user?.email || ''
+        userEmail: responseData.data.user?.email || '',
+        userId: userId,
+        responseId: responseId
       });
+
+      // Log for debugging
+      if (userId) {
+        console.log('Stored user_id from login:', userId);
+      } else {
+        console.warn('user_id not found in login response');
+      }
+      if (responseId) {
+        console.log('Stored response_id from login:', responseId);
+      } else {
+        console.warn('response_id not found in login response');
+      }
 
       // Update header with user's first name
       updateHeaderWithUserName(responseData.data.user?.first_name || '');
@@ -99,7 +119,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Logout handler
   logoutButton.addEventListener('click', async () => {
-    await chrome.storage.local.remove(['authToken', 'tokenExpiration', 'username', 'userFirstName', 'userEmail']);
+    await chrome.storage.local.remove(['authToken', 'tokenExpiration', 'username', 'userFirstName', 'userEmail', 'userId', 'responseId']);
     updateHeaderWithUserName('');
     chrome.runtime.sendMessage({ action: 'updateBadgeForLogin', loggedIn: false });
     showLoginScreen();
@@ -279,17 +299,28 @@ document.addEventListener('DOMContentLoaded', () => {
       </div>
     `;
 
-    // Show spinner if mobility data is loading
-    if (!mobilityData || mobilityData.status === 'in_progress') {
+    // Show available data even when status is in_progress
+    if (mobilityData && mobilityData.job_mobility) {
+      // Show available data even if status is in_progress
+      html += createMobilityHTML(mobilityData.job_mobility, companyName, companyLink);
+      
+      // Show loading indicator if still in progress
+      if (mobilityData.job_mobility.status === 'in_progress') {
+        html += `
+          <div class="job-field" style="text-align: center; padding: 20px;">
+            <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #131F39; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <div style="margin-top: 10px; color: #666;">Loading more data...</div>
+          </div>
+        `;
+      }
+    } else if (!mobilityData || (mobilityData.status && mobilityData.status === 'in_progress')) {
+      // Show spinner only if no data at all
       html += `
         <div class="job-field" style="text-align: center; padding: 20px;">
           <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #131F39; border-radius: 50%; animation: spin 1s linear infinite;"></div>
           <div style="margin-top: 10px; color: #666;">Loading job mobility data...</div>
         </div>
       `;
-    } else if (mobilityData && mobilityData.job_mobility) {
-      // Show mobility data
-      html += createMobilityHTML(mobilityData.job_mobility, companyName, companyLink);
     }
 
     jobInfoContainer.innerHTML = html;

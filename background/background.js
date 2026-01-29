@@ -359,15 +359,21 @@ function parseLocationValue(location) {
 // Fetch job mobility data
 async function fetchJobMobility(jobData, tabId) {
   try {
-    // Get user_id from storage or generate one
-    const storage = await chrome.storage.local.get(['userId']);
+    // Get user_id and response_id from login response (stored in chrome.storage)
+    const storage = await chrome.storage.local.get(['userId', 'responseId']);
     let userId = storage.userId;
+    let responseId = storage.responseId;
+
+    // If not available from login, generate UUIDs as fallback
     if (!userId) {
+      console.warn('user_id not found in storage, generating UUID');
       userId = generateUUID();
-      await chrome.storage.local.set({ userId });
     }
 
-    const responseId = generateUUID();
+    if (!responseId) {
+      console.warn('response_id not found in storage, generating UUID');
+      responseId = generateUUID();
+    }
 
     // Prepare request payload
     const payload = {
@@ -385,7 +391,8 @@ async function fetchJobMobility(jobData, tabId) {
     // Make initial API call to get token
     const apiToken = 'hsy79jovh9sy973hfs80yj3upjgktf8';
     
-    if (!apiToken || apiToken === 'hsy79jovh9sy973hfs80yj3upjgktf8') {
+    // Check if token is missing or still contains placeholder (build script didn't run)
+    if (!apiToken || apiToken.includes('{{AOI_HACKATHON_API_TOKEN}}')) {
       console.error('API token not set! Please run: npm run build');
       throw new Error('API token not configured. Please run the build script.');
     }
@@ -444,7 +451,8 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
     try {
       const apiToken = 'hsy79jovh9sy973hfs80yj3upjgktf8';
       
-      if (!apiToken || apiToken === 'hsy79jovh9sy973hfs80yj3upjgktf8') {
+      // Check if token is missing or still contains placeholder (build script didn't run)
+      if (!apiToken || apiToken.includes('{{AOI_HACKATHON_API_TOKEN}}')) {
         console.error('API token not set! Please run: npm run build');
         throw new Error('API token not configured. Please run the build script.');
       }
@@ -524,9 +532,9 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
     }
   };
 
-  // Start polling immediately, then every 2 seconds
+  // Start polling immediately, then every 3 seconds
   poll();
-  pollInterval = setInterval(poll, 2000);
+  pollInterval = setInterval(poll, 3000);
 }
 
 
