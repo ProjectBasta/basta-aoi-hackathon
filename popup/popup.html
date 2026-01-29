@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Basta Job Assistant</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <h1>Basta Job Assistant</h1>
+    <div id="headerUserInfo" class="header-user-info" style="display: none;">
+      <span id="headerUserName" class="user-name"></span>
+      <span class="separator">|</span>
+      <button id="logoutButton" class="header-logout-btn">Logout</button>
+    </div>
+  </header>
+  
+  <div class="content">
+    <!-- Login Screen -->
+    <div id="loginScreen" class="login-screen">
+      <div class="login-form">
+        <h2>Login</h2>
+        <form id="loginForm">
+          <div class="form-group">
+            <label for="userId">Username</label>
+            <input type="text" id="userId" name="userId" required autocomplete="username" placeholder="user@example.com">
+          </div>
+          <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required autocomplete="current-password">
+          </div>
+          <div id="loginError" class="error-message" style="display: none;"></div>
+          <button type="submit" class="btn btn-primary" id="loginButton">Login</button>
+        </form>
+      </div>
+    </div>
+
+    <!-- Job Info Screen (shown when logged in) -->
+    <div id="jobInfoScreen" class="job-info-screen" style="display: none;">
+      <div id="jobInfo" class="job-info">
+        <div class="loading">Loading job information...</div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>
+
