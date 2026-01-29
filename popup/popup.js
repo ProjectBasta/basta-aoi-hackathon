@@ -441,14 +441,14 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // Show available data even when status is in_progress (same order as sidebar)
     if (mobilityData && mobilityData.job_mobility) {
-      // Show available data even if status is in_progress
-      // Pass the full mobilityData object, function will extract job_mobility
+      // Show available data even if status is in_progress; hide seekr profile while loading
+      const showSeekrProfile = mobilityData.job_mobility.status !== "in_progress" ? seekrProfile : null
       html += createMobilityHTML(
         mobilityData,
         companyName,
         companyLink,
         jobData.compensation,
-        seekrProfile,
+        showSeekrProfile,
       )
 
       // Show loading indicator if still in progress
@@ -464,16 +464,13 @@ document.addEventListener("DOMContentLoaded", () => {
       !mobilityData ||
       (mobilityData.status && mobilityData.status === "in_progress")
     ) {
-      // Show spinner only if no data at all; still show seekr profile below
+      // Show spinner only if no data at all; do not show seekr profile while loading
       html += `
         <div class="job-field" style="text-align: center; padding: 20px;">
           <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #131F39; border-radius: 50%; animation: spin 1s linear infinite;"></div>
           <div style="margin-top: 10px; color: #666;">Loading job mobility data...</div>
         </div>
       `
-      if (seekrProfile) {
-        html += renderSeekrProfileHTML(seekrProfile)
-      }
     }
 
     jobInfoContainer.innerHTML = html

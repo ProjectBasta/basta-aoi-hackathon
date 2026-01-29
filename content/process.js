@@ -1094,8 +1094,8 @@
       if (isJobContent) {
         bodyEl.innerHTML = createSidebarHTML(mainContentHtmlOrJobData, mobilityData, profile)
       } else {
-        const profileHtml = profile ? renderSeekrProfileHTML(profile) : ""
-        bodyEl.innerHTML = profileHtml + mainContentHtmlOrJobData
+        // Loading or empty: do not show seekr profile
+        bodyEl.innerHTML = mainContentHtmlOrJobData
       }
     })
   }
@@ -1148,7 +1148,9 @@
       mobilityHTML = createMobilityHTML(mobilityData, companyName, companyLink, jobData.compensation);
     }
 
-    const seekrProfileHtml = seekrProfile ? renderSeekrProfileHTML(seekrProfile) : ''
+    // Only show seekr profile when data is complete (not loading)
+    const seekrProfileHtml = (seekrProfile && mobilityData && mobilityData.job_mobility && hasCompleteMobilityData(mobilityData))
+      ? renderSeekrProfileHTML(seekrProfile) : ''
 
     return `
       <div class="basta-sidebar-content">
