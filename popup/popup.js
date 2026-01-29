@@ -333,16 +333,37 @@ document.addEventListener("DOMContentLoaded", () => {
     })
   }
 
+  function renderSeekrProfileHTML(profileData) {
+    const topDrivers = profileData?.top_drivers ?? profileData?.data?.top_drivers
+    if (!profileData || !topDrivers || !topDrivers.length) return ""
+    const drivers = topDrivers
+    const driversHtml = drivers
+      .map((d) => {
+        const driverText = escapeHtml(d.driver || "")
+        const tooltip = escapeHtml(d.description || "")
+        return `<span class="job-field-seekr-driver" title="${tooltip}">${driverText}</span>`
+      })
+      .join(", ")
+    return `
+      <div class="job-field job-field-seekr-profile">
+        <div class="job-field-label job-field-seekr-profile-title">Your seekr profile</div>
+        <div class="job-field-label">Top Drivers</div>
+        <div class="job-field-value job-field-seekr-drivers">${driversHtml}</div>
+      </div>
+    `
+  }
+
   function loadJobInfo() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const activeTabId = tabs.length > 0 ? tabs[0].id : null
       const activeTab = tabs.length > 0 ? tabs[0] : null
 
       chrome.storage.local.get(
-        ["jobInfoByTab", "jobMobilityByTab"],
+        ["jobInfoByTab", "jobMobilityByTab", "seekrProfile", "responseId"],
         (result) => {
           const jobInfoByTab = result.jobInfoByTab || {}
           const jobMobilityByTab = result.jobMobilityByTab || {}
+          const seekrProfile = result.seekrProfile || null
           const jobResponse = activeTabId ? jobInfoByTab[activeTabId] : null
           const mobilityData = activeTabId
             ? jobMobilityByTab[activeTabId]
@@ -350,10 +371,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
           function show(jobData, mobility) {
             if (jobData && (jobData.jobTitle || jobData.companyName)) {
-              displayJobInfo(jobData, mobility)
+              displayJobInfo(jobData, mobility, seekrProfile)
             } else {
-              displayNoJobInfo()
+              displayNoJobInfo(seekrProfile)
             }
+          }
+
+          // If we have responseId but no profile yet, request fetch so it appears when ready
+          if (result.responseId && !seekrProfile) {
+            chrome.runtime.sendMessage({ action: "fetchSeekrProfile" }, (res) => {
+              if (res?.success && res?.data) {
+                chrome.storage.local.set({ seekrProfile: res.data }, () => {})
+              }
+            })
           }
 
           // On a job board, always get fresh parse so compensation reflects current page after switching jobs
@@ -381,22 +411,27 @@ document.addEventListener("DOMContentLoaded", () => {
                 }
               },
             )
-            return
-          }
+        } else {
           show(jobResponse, mobilityData)
-        },
+        }
+      }
       )
     })
   }
 
-  function displayJobInfo(jobData, mobilityData) {
+  function displayJobInfo(jobData, mobilityData, seekrProfile) {
     const companyName = escapeHtml(jobData.companyName || "Not available")
     const companyLink = companySearchUrl(jobData.companyName)
     const overallBadgeHtml = mobilityData?.job_mobility
       ? renderBadgeHtml(mobilityData.job_mobility.overall_badge)
       : renderBadgeHtml(null)
 
-    let html = `
+    // Same order as sidebar: Your seekr profile (Top Drivers), Company, This role at this company, Compensation, then rest
+    let html = ""
+    if (seekrProfile) {
+      html += renderSeekrProfileHTML(seekrProfile)
+    }
+    html += `
       <div class="job-field">
         <div class="job-field-label">Company</div>
         <div class="job-field-value job-field-company-with-badge">
@@ -407,7 +442,7 @@ document.addEventListener("DOMContentLoaded", () => {
       
     `
 
-    // Show available data even when status is in_progress
+    // Show available data even when status is in_progress (same order as sidebar)
     if (mobilityData && mobilityData.job_mobility) {
       // Show available data even if status is in_progress
       // Pass the full mobilityData object, function will extract job_mobility
@@ -453,28 +488,23 @@ document.addEventListener("DOMContentLoaded", () => {
     companyLink,
     pageCompensation,
   ) {
-    // Handle both direct job_mobility object and nested structure
+    // Same order as sidebar: This role at this company, Compensation, Recommendation, What works well, Things to consider, Skills, Pathways
     const data = mobilityData.job_mobility || mobilityData || {}
     let html = ""
 
-    if (data.skills && data.skills.length > 0) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Skills that will help you succeed in this role</div>
-          <div class="job-field-value">${data.skills.map((skill) => escapeHtml(skill)).join(", ")}</div>
-        </div>
-      `
-    }
-
-    // Always show Required Education (even if empty)
+    // This role at this company (badges)
     html += `
       <div class="job-field">
-        <div class="job-field-label">Required Education:</div>
-        <div class="job-field-value">${escapeHtml(data.education || "Not available")}</div>
+        <div class="job-field-label">This role at this company:</div>
+        <div class="job-field-value basta-badges-wrap">
+          <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
+          <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
+          <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
+        </div>
       </div>
     `
 
-    // Always show Compensation: fetched page compensation + single comparison icon (no wage data)
+    // Compensation
     const wage = data.wage || {}
     const pageCompDisplay = formatCompensationForDisplay(pageCompensation || "")
     const pageCompText = pageCompDisplay ? escapeHtml(pageCompDisplay) : ""
@@ -487,86 +517,6 @@ document.addEventListener("DOMContentLoaded", () => {
           <span class="basta-compensation-text">${pageCompText || "Not on page"}</span>
           ${compIndicatorHtml}
         </div>
-      </div>
-    `
-
-    // Always show What this company is known for (badges; overall is next to company name)
-    html += `
-      <div class="job-field">
-        <div class="job-field-label">What this company is known for</div>
-        <div class="job-field-value basta-badges-wrap">
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
-        </div>
-      </div>
-    `
-
-    // Always show Early Career Companies (even if empty)
-    html += `
-      <div class="job-field">
-        <div class="job-field-label">Early Career Companies:</div>
-        <div class="job-field-value">${
-          data.badge_early_career_company &&
-          data.badge_early_career_company.length > 0
-            ? data.badge_early_career_company
-                .map((c) => {
-                  const companyName = escapeHtml(c)
-                  const companyLink = companySearchUrl(c)
-                  return `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>`
-                })
-                .join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
-
-    // Always show Growth Companies (even if empty)
-    html += `
-      <div class="job-field">
-        <div class="job-field-label">Growth Companies:</div>
-        <div class="job-field-value">${
-          data.badge_growth_company && data.badge_growth_company.length > 0
-            ? data.badge_growth_company
-                .map((c) => {
-                  const companyName = escapeHtml(c)
-                  const companyLink = companySearchUrl(c)
-                  return `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>`
-                })
-                .join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
-
-    // Always show Stability Companies (even if empty)
-    html += `
-      <div class="job-field">
-        <div class="job-field-label">Stability Companies:</div>
-        <div class="job-field-value">${
-          data.badge_stability_company &&
-          data.badge_stability_company.length > 0
-            ? data.badge_stability_company
-                .map((c) => {
-                  const companyName = escapeHtml(c)
-                  const companyLink = companySearchUrl(c)
-                  return `<a href="${companyLink}" target="_blank" class="job-field-company-link">${companyName}</a>`
-                })
-                .join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
-
-    // Always show Pathways (even if empty)
-    html += `
-      <div class="job-field">
-        <div class="job-field-label">Pathways:</div>
-        <div class="job-field-value">${
-          data.pathways && data.pathways.length > 0
-            ? data.pathways.map((p) => escapeHtml(p)).join(", ")
-            : "Not available"
-        }</div>
       </div>
     `
 
@@ -605,15 +555,41 @@ document.addEventListener("DOMContentLoaded", () => {
       `
     }
 
+    if (data.skills && data.skills.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Skills that will help you succeed in this role</div>
+          <div class="job-field-value">${data.skills.map((skill) => escapeHtml(skill)).join(", ")}</div>
+        </div>
+      `
+    }
+
+    // Pathways at the bottom
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Pathways:</div>
+        <div class="job-field-value">${
+          data.pathways && data.pathways.length > 0
+            ? data.pathways.map((p) => escapeHtml(p)).join(", ")
+            : "Not available"
+        }</div>
+      </div>
+    `
+
     return html
   }
 
-  function displayNoJobInfo() {
-    jobInfoContainer.innerHTML = `
+  function displayNoJobInfo(seekrProfile) {
+    let html = ""
+    if (seekrProfile) {
+      html += renderSeekrProfileHTML(seekrProfile)
+    }
+    html += `
       <div class="empty">
         <p>No Job information available.</p>
       </div>
     `
+    jobInfoContainer.innerHTML = html
     jobInfoContainer.classList.add("empty")
     jobInfoContainer.classList.remove("loading")
   }
@@ -733,8 +709,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
       // Only update job info if logged in
       if (jobInfoScreen.style.display !== "none") {
-        if (changes.jobInfoByTab || changes.jobMobilityByTab) {
-          // Job info or mobility data for a tab was updated, reload to get current tab's info
+        if (changes.seekrProfile || changes.jobInfoByTab || changes.jobMobilityByTab) {
+          // Seekr profile or job/mobility data updated, reload to show latest
           loadJobInfo()
         } else if (changes.lastJobInfo) {
           // Fallback: check if it's for the current tab

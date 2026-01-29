@@ -1032,7 +1032,67 @@
     )
   }
   let apiCallMadeForCurrentPage = false
+  let mobilityRequestInProgress = false
   let currentPageUrl = location.href
+  let currentDisplayedJob = null
+
+  function hasCompleteMobilityData(mobilityData) {
+    if (!mobilityData || !mobilityData.job_mobility) return false
+    const status = mobilityData.job_mobility.status
+    return status === "completed" || status === undefined
+  }
+
+  function renderLoadingOnly(message = "Loading job insights...") {
+    return `
+      <div class="basta-sidebar-content">
+        <div class="basta-sidebar-loading-block">
+          <div class="basta-sidebar-spinner"><span class="basta-sidebar-spinner-circle"></span><span>${escapeHtml(message)}</span></div>
+        </div>
+      </div>
+    `
+  }
+
+  function bodyHasExistingJobContent(bodyEl) {
+    return bodyEl && bodyEl.querySelector(".basta-sidebar-content .basta-sidebar-field")
+  }
+
+  function jobHasChanged(freshJobData) {
+    if (!currentDisplayedJob) return true
+    const sameCompany = (currentDisplayedJob.companyName || "") === (freshJobData.companyName || "")
+    const sameTitle = (currentDisplayedJob.jobTitle || "") === (freshJobData.jobTitle || "")
+    return !sameCompany || !sameTitle
+  }
+
+  // Profile data shape: { user_id, response_id, top_drivers: [{ driver, description }, ...], predictability_score, predictability_description } or nested in .data
+  function renderSeekrProfileHTML(profileData) {
+    const topDrivers = profileData?.top_drivers ?? profileData?.data?.top_drivers
+    if (!profileData || !topDrivers || !topDrivers.length) return ""
+    const drivers = topDrivers
+    const driversHtml = drivers
+      .map((d) => {
+        const driverText = escapeHtml(d.driver || "")
+        const tooltip = escapeHtml(d.description || "")
+        return `<span class="basta-seekr-driver" title="${tooltip}">${driverText}</span>`
+      })
+      .join(", ")
+    return `
+      <div class="basta-sidebar-seekr-profile">
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label basta-seekr-profile-title">Your seekr profile</div>
+          <div class="basta-sidebar-label">Top Drivers</div>
+          <div class="basta-sidebar-value basta-seekr-drivers">${driversHtml}</div>
+        </div>
+      </div>
+    `
+  }
+
+  function setSidebarBodyWithProfile(bodyEl, mainContentHtml) {
+    if (!bodyEl) return
+    chrome.storage.local.get(["seekrProfile"], (r) => {
+      const profileHtml = r.seekrProfile ? renderSeekrProfileHTML(r.seekrProfile) : ""
+      bodyEl.innerHTML = profileHtml + mainContentHtml
+    })
+  }
 
   function createSidebarHTML(jobData, mobilityData) {
     if (!jobData || (!jobData.jobTitle && !jobData.companyName)) {
@@ -1049,29 +1109,37 @@
       ? renderBadgeHtml(mobilityData.job_mobility.overall_badge)
       : renderBadgeHtml(null)
 
-    // Show available data even when status is in_progress
-    let mobilityHTML = ""
-    if (mobilityData && mobilityData.job_mobility) {
-      // Show available data even if status is in_progress
-      mobilityHTML = createMobilityHTML(
-        mobilityData,
-        companyName,
-        companyLink,
-        jobData.compensation,
-      )
-
-      // Show loading indicator if still in progress
-      if (mobilityData.job_mobility.status === "in_progress") {
-        mobilityHTML +=
-          '<div class="basta-sidebar-spinner"><span class="basta-sidebar-spinner-circle"></span><span>Loading more data...</span></div>'
-      }
-    } else if (
-      !mobilityData ||
-      (mobilityData.status && mobilityData.status === "in_progress")
-    ) {
-      // Show spinner only if no data at all
-      mobilityHTML =
-        '<div class="basta-sidebar-spinner"><span class="basta-sidebar-spinner-circle"></span><span>Loading job mobility data...</span></div>'
+    // Only show mobility content when we have complete data (status completed)
+    let mobilityHTML = '';
+    let thisRoleAtCompanyHtml = '';
+    let compensationHtml = '';
+    if (mobilityData && mobilityData.job_mobility && hasCompleteMobilityData(mobilityData)) {
+      const data = mobilityData.job_mobility;
+      thisRoleAtCompanyHtml = `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">This role at this company:</div>
+          <div class="basta-sidebar-value basta-badges-wrap">
+            <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
+            <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
+            <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
+          </div>
+        </div>
+      `;
+      const wage = data.wage || {};
+      const pageCompDisplay = formatCompensationForDisplay(jobData.compensation || '');
+      const pageCompText = pageCompDisplay ? escapeHtml(pageCompDisplay) : '';
+      const compIndicator = getCompensationIndicator(jobData.compensation, wage);
+      const compIndicatorHtml = renderCompensationIndicatorHtml(compIndicator);
+      compensationHtml = `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Compensation:</div>
+          <div class="basta-sidebar-value basta-compensation-row">
+            <span class="basta-compensation-text">${pageCompText || 'Not on page'}</span>
+            ${compIndicatorHtml}
+          </div>
+        </div>
+      `;
+      mobilityHTML = createMobilityHTML(mobilityData, companyName, companyLink, jobData.compensation);
     }
 
     return `
@@ -1083,10 +1151,8 @@
             ${overallBadgeHtml}
           </div>
         </div>
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Title</div>
-          <div class="basta-sidebar-value">${escapeHtml(jobData.jobTitle || "Not available")}</div>
-        </div>
+        ${thisRoleAtCompanyHtml}
+        ${compensationHtml}
         ${mobilityHTML}
       </div>
     `
@@ -1101,128 +1167,6 @@
     // Handle both direct job_mobility object and nested structure
     const data = mobilityData.job_mobility || mobilityData || {}
     let html = ""
-
-    if (data.primary_industry) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Industry</div>
-          <div class="basta-sidebar-value">${escapeHtml(data.primary_industry)}</div>
-        </div>
-      `
-    }
-
-    if (data.skills && data.skills.length > 0) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Skills that will help you succeed in this role</div>
-          <div class="basta-sidebar-value">${data.skills.map((skill) => escapeHtml(skill)).join(", ")}</div>
-        </div>
-      `
-    }
-
-    // Always show Required Education (even if empty)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">Required Education:</div>
-        <div class="basta-sidebar-value">${escapeHtml(data.education || "Not available")}</div>
-      </div>
-    `
-
-    // Always show Compensation: fetched page compensation + single comparison icon (no wage data)
-    const wage = data.wage || {}
-    const pageCompDisplay = formatCompensationForDisplay(pageCompensation || "")
-    const pageCompText = pageCompDisplay ? escapeHtml(pageCompDisplay) : ""
-    const compIndicator = getCompensationIndicator(pageCompensation, wage)
-    const compIndicatorHtml = renderCompensationIndicatorHtml(compIndicator)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">Compensation:</div>
-        <div class="basta-sidebar-value basta-compensation-row">
-          <span class="basta-compensation-text">${pageCompText || "Not on page"}</span>
-          ${compIndicatorHtml}
-        </div>
-      </div>
-    `
-
-    // Always show What this company is known for (badges; overall is next to company name)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">What this company is known for</div>
-        <div class="basta-sidebar-value basta-badges-wrap">
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
-        </div>
-      </div>
-    `
-
-    // Always show Early Career Companies (even if empty)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">Early Career Companies:</div>
-        <div class="basta-sidebar-value">${
-          data.badge_early_career_company &&
-          data.badge_early_career_company.length > 0
-            ? data.badge_early_career_company
-                .map((c) => {
-                  const companyName = escapeHtml(c)
-                  const companyLink = companySearchUrl(c)
-                  return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`
-                })
-                .join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
-
-    // Always show Growth Companies (even if empty)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">Growth Companies:</div>
-        <div class="basta-sidebar-value">${
-          data.badge_growth_company && data.badge_growth_company.length > 0
-            ? data.badge_growth_company
-                .map((c) => {
-                  const companyName = escapeHtml(c)
-                  const companyLink = companySearchUrl(c)
-                  return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`
-                })
-                .join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
-
-    // Always show Stability Companies (even if empty)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">Stability Companies:</div>
-        <div class="basta-sidebar-value">${
-          data.badge_stability_company &&
-          data.badge_stability_company.length > 0
-            ? data.badge_stability_company
-                .map((c) => {
-                  const companyName = escapeHtml(c)
-                  const companyLink = companySearchUrl(c)
-                  return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`
-                })
-                .join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
-
-    // Always show Pathways (even if empty)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">Pathways:</div>
-        <div class="basta-sidebar-value">${
-          data.pathways && data.pathways.length > 0
-            ? data.pathways.map((p) => escapeHtml(p)).join(", ")
-            : "Not available"
-        }</div>
-      </div>
-    `
 
     if (data.recommendation) {
       html += `
@@ -1259,7 +1203,26 @@
       `
     }
 
-    return html
+    if (data.skills && data.skills.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Skills that will help you succeed in this role</div>
+          <div class="basta-sidebar-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    // Pathways at the bottom
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Pathways:</div>
+        <div class="basta-sidebar-value">${data.pathways && data.pathways.length > 0
+          ? data.pathways.map(p => escapeHtml(p)).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
+
+    return html;
   }
 
   function injectSidebarStyles() {
@@ -1486,6 +1449,29 @@
 
       #${SIDEBAR_ID} .basta-sidebar-field:last-child {
         margin-bottom: 0;
+      }
+
+      #${SIDEBAR_ID} .basta-sidebar-seekr-profile {
+        padding-bottom: 16px;
+        margin-bottom: 16px;
+        border-bottom: 1px solid #E2E8F0;
+      }
+      #${SIDEBAR_ID} .basta-seekr-profile-title {
+        font-size: 13px !important;
+        text-transform: none !important;
+        letter-spacing: 0;
+        color: #0F172A !important;
+      }
+      #${SIDEBAR_ID} .basta-seekr-drivers {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+      }
+      #${SIDEBAR_ID} .basta-seekr-driver {
+        cursor: help;
+        text-decoration: underline;
+        text-decoration-style: dotted;
+        text-underline-offset: 3px;
       }
 
       #${SIDEBAR_ID} .basta-sidebar-label {
@@ -2021,12 +2007,15 @@
       if (!bodyElement) return
 
       if (!isLoggedIn) {
-        bodyElement.innerHTML = `
+        setSidebarBodyWithProfile(
+          bodyElement,
+          `
           <div class="basta-sidebar-empty">
             <p>Sign in to see job insights.</p>
             <p style="margin-top: 12px; font-size: 13px; color: #666;">Click <strong>☰ Menu</strong> above to log in.</p>
           </div>
         `
+        )
         return
       }
 
@@ -2037,38 +2026,79 @@
         apiCallMadeForCurrentPage = false
       }
 
-      if (
-        !freshJobData ||
-        (!freshJobData.jobTitle && !freshJobData.companyName)
-      ) {
-        bodyElement.innerHTML = `
-          <div class="basta-sidebar-empty">
-            <p>No Job information available.</p>
-          </div>
-        `
-        return
+      const hasFreshJob = freshJobData && (freshJobData.jobTitle || freshJobData.companyName);
+
+      if (!hasFreshJob) {
+        // Fall back to stored job so we still trigger the API and can show data once it arrives
+        chrome.runtime.sendMessage({ action: 'getJobInfo' }, (storedJob) => {
+          if (!sidebar.isConnected) return;
+          const bodyEl = sidebar.querySelector('.basta-sidebar-body');
+          if (!bodyEl) return;
+          if (chrome.runtime.lastError) {
+            setSidebarBodyWithProfile(bodyEl, `<div class="basta-sidebar-empty"><p>No Job information available.</p></div>`);
+            return;
+          }
+          if (storedJob && (storedJob.jobTitle || storedJob.companyName)) {
+            chrome.runtime.sendMessage({ action: 'getMobilityForCurrentTab' }, (mobilityData) => {
+              if (!sidebar.isConnected) return;
+              const el = sidebar.querySelector('.basta-sidebar-body');
+              if (!el) return;
+              const hasComplete = hasCompleteMobilityData(mobilityData);
+              const hasExisting = bodyHasExistingJobContent(el);
+              const jobChanged = jobHasChanged(storedJob);
+              // Only show content when data is for this job; never show old data with new company name
+              if (hasComplete && !jobChanged) {
+                currentDisplayedJob = { companyName: storedJob.companyName, jobTitle: storedJob.jobTitle };
+                setSidebarBodyWithProfile(el, createSidebarHTML(storedJob, mobilityData));
+              } else if (jobChanged) {
+                setSidebarBodyWithProfile(el, renderLoadingOnly('Fetching data for this job. '));
+              } else if (hasExisting && !hasComplete) {
+                setSidebarBodyWithProfile(el, renderLoadingOnly('Fetching data for this job. '));
+              } else {
+                setSidebarBodyWithProfile(el, renderLoadingOnly());
+              }
+            });
+            if (!apiCallMadeForCurrentPage || forceApiCall) {
+              if (!mobilityRequestInProgress) {
+                mobilityRequestInProgress = true;
+                apiCallMadeForCurrentPage = true;
+                chrome.runtime.sendMessage({ action: 'fetchJobMobility', jobData: storedJob });
+              }
+            }
+          } else {
+            setSidebarBodyWithProfile(bodyEl, `<div class="basta-sidebar-empty"><p>No Job information available.</p></div>`);
+          }
+        });
+        return;
       }
 
       // Save fresh job data so popup and storage stay in sync (compensation included)
       saveJobInfo(freshJobData)
 
-      // Get mobility for this tab and render with fresh job data
-      chrome.runtime.sendMessage(
-        { action: "getMobilityForCurrentTab" },
-        (mobilityData) => {
-          if (!sidebar.isConnected) return
-          const bodyEl = sidebar.querySelector(".basta-sidebar-body")
-          if (!bodyEl) return
-          bodyEl.innerHTML = createSidebarHTML(
-            freshJobData,
-            mobilityData || { status: "in_progress" },
-          )
-        },
-      )
+      // Get mobility for this tab - only show full content when data is complete; never show old data with new company name
+      chrome.runtime.sendMessage({ action: 'getMobilityForCurrentTab' }, (mobilityData) => {
+        if (!sidebar.isConnected) return;
+        const bodyEl = sidebar.querySelector('.basta-sidebar-body');
+        if (!bodyEl) return;
+        const hasComplete = hasCompleteMobilityData(mobilityData);
+        const hasExisting = bodyHasExistingJobContent(bodyEl);
+        const jobChanged = jobHasChanged(freshJobData);
+        if (hasComplete && !jobChanged) {
+          currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle };
+          setSidebarBodyWithProfile(bodyEl, createSidebarHTML(freshJobData, mobilityData));
+        } else if (jobChanged) {
+          setSidebarBodyWithProfile(bodyEl, renderLoadingOnly('Fetching data for this job.'));
+        } else if (hasExisting && !hasComplete) {
+          setSidebarBodyWithProfile(bodyEl, renderLoadingOnly('Fetching data for this job. '));
+        } else {
+          setSidebarBodyWithProfile(bodyEl, renderLoadingOnly());
+        }
+      });
 
-      // Trigger API call for job mobility only if not already made for this page
-      if (!apiCallMadeForCurrentPage || forceApiCall) {
+      // Trigger API call only once per page; avoid duplicate calls when loadSidebarContent is invoked multiple times
+      if ((!apiCallMadeForCurrentPage || forceApiCall) && !mobilityRequestInProgress) {
         apiCallMadeForCurrentPage = true
+        mobilityRequestInProgress = true
         chrome.runtime.sendMessage({
           action: "fetchJobMobility",
           jobData: freshJobData,
@@ -2098,8 +2128,14 @@
 
         // Handle login or job info updates
         // Only update UI, don't trigger new API calls on storage changes
-        if (changes.jobMobilityByTab || changes.lastJobMobility) {
-          // Update UI with fresh job data (including compensation) + new mobility data
+        if (changes.seekrProfile) {
+          const sidebar = document.getElementById(SIDEBAR_ID)
+          if (sidebar) {
+            const bodyEl = sidebar.querySelector(".basta-sidebar-body")
+            if (bodyEl) loadSidebarContent(false)
+          }
+        } else if (changes.jobMobilityByTab || changes.lastJobMobility) {
+          // Update UI with fresh job data + new mobility data (only when complete)
           const sidebar = document.getElementById(SIDEBAR_ID)
           if (sidebar) {
             const bodyElement = sidebar.querySelector(".basta-sidebar-body")
@@ -2111,11 +2147,13 @@
                   if (
                     freshJobData &&
                     (freshJobData.jobTitle || freshJobData.companyName) &&
-                    mobilityData
+                    mobilityData &&
+                    hasCompleteMobilityData(mobilityData)
                   ) {
-                    bodyElement.innerHTML = createSidebarHTML(
-                      freshJobData,
-                      mobilityData,
+                    currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle }
+                    setSidebarBodyWithProfile(
+                      bodyElement,
+                      createSidebarHTML(freshJobData, mobilityData),
                     )
                   }
                 },
@@ -2127,13 +2165,8 @@
           changes.sidebarVisible.newValue === false
         ) {
           removeSidebar()
-        } else if (
-          changes.jobInfoByTab ||
-          changes.lastJobInfo ||
-          changes.authToken ||
-          changes.tokenExpiration
-        ) {
-          // Check if sidebar exists, if not create it (only when sidebar is enabled)
+        } else if (changes.authToken || changes.tokenExpiration) {
+          // Only react to auth changes (login/logout), not jobInfoByTab/lastJobInfo to avoid duplicate loadSidebarContent when we call saveJobInfo
           chrome.storage.local.get(["sidebarVisible"], (r) => {
             if (r.sidebarVisible === false) return
             const sidebar = document.getElementById(SIDEBAR_ID)
@@ -2147,18 +2180,21 @@
       }
     })
 
-    // Also listen for URL changes (for SPA navigation)
+    // Also listen for URL changes (for SPA navigation); debounce so only one loadSidebarContent runs per navigation
     let lastUrl = location.href
+    let urlChangeTimeoutId = null
     new MutationObserver(() => {
       const url = location.href
       if (url !== lastUrl) {
         lastUrl = url
         currentPageUrl = url
-        apiCallMadeForCurrentPage = false // Reset flag on URL change
-        setTimeout(() => {
+        apiCallMadeForCurrentPage = false
+        if (urlChangeTimeoutId) clearTimeout(urlChangeTimeoutId)
+        urlChangeTimeoutId = setTimeout(() => {
+          urlChangeTimeoutId = null
           const sidebar = document.getElementById(SIDEBAR_ID)
           if (sidebar) {
-            loadSidebarContent(true) // Force API call on URL change (page refresh/navigation)
+            loadSidebarContent(true)
           }
         }, 2000)
       }
@@ -2210,11 +2246,16 @@
         const mobilityData = request.data.job_mobility
           ? request.data
           : { job_mobility: request.data }
-        bodyElement.innerHTML = createSidebarHTML(freshJobData, mobilityData)
+        if (hasCompleteMobilityData(mobilityData)) {
+          currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle }
+          setSidebarBodyWithProfile(bodyElement, createSidebarHTML(freshJobData, mobilityData))
+        }
       } else if (request.error) {
-        bodyElement.innerHTML =
-          createSidebarHTML(freshJobData, { status: "in_progress" }) +
-          `<div class="basta-sidebar-error" style="padding: 10px; color: #d32f2f; font-size: 12px;">Error: ${escapeHtml(request.error)}</div>`
+        setSidebarBodyWithProfile(
+          bodyElement,
+          renderLoadingOnly() +
+            `<div class="basta-sidebar-error" style="padding: 10px; color: #d32f2f; font-size: 12px;">Error: ${escapeHtml(request.error)}</div>`
+        )
       }
     }
   })

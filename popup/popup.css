@@ -484,6 +484,36 @@ header h1 {
   flex: 1;
 }
 
+/* Seekr profile (matches sidebar layout) */
+.job-field-seekr-profile,
+.job-field.job-field-seekr-profile {
+  margin-bottom: 6px;
+  padding-bottom: 16px;
+  margin-bottom: 16px;
+  border-bottom: 1px solid var(--basta-border);
+}
+.job-field-seekr-profile-title {
+  font-size: 13px;
+  text-transform: none;
+  letter-spacing: 0;
+  color: var(--basta-text);
+  font-weight: 700;
+}
+.job-field-seekr-drivers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 6px;
+}
+.job-field-seekr-driver {
+  cursor: help;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 3px;
+  font-size: 14px;
+  color: var(--basta-text);
+}
+
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }

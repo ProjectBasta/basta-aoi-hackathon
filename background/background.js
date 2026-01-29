@@ -336,7 +336,43 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
   }
+
+  if (request.action === 'fetchSeekrProfile') {
+    fetchSeekrProfile()
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
+  }
 });
+
+// Seekr profile API: GET /seekr/profile?response_id={{seekr_response_id}}
+const SEEKR_PROFILE_API_BASE = 'https://aoi-hackathon.projectbasta.com';
+
+// Fetch seekr profile for the current user (uses response_id from storage as seekr_response_id)
+async function fetchSeekrProfile() {
+  const storage = await chrome.storage.local.get(['responseId']);
+  const seekrResponseId = storage.responseId;
+  if (!seekrResponseId) {
+    return { success: false, error: 'No response_id available. Sign in first.' };
+  }
+  const url = `${SEEKR_PROFILE_API_BASE}/seekr/profile?response_id=${encodeURIComponent(seekrResponseId)}`;
+  const apiToken = 'hsy79jovh9sy973hfs80yj3upjgktf8';
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiToken
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Profile request failed: ${response.status} ${response.statusText}${text ? ' ' + text : ''}`);
+  }
+  const data = await response.json();
+  // Store the inner profile (API may return { data: { top_drivers, ... } } or { top_drivers, ... } directly)
+  const profilePayload = data && typeof data.data !== 'undefined' ? data.data : data;
+  return { success: true, data: profilePayload };
+}
 
 // Generate UUID for user_id and response_id
 function generateUUID() {
@@ -368,6 +404,15 @@ function parseLocationValue(location) {
 // Fetch job mobility data
 async function fetchJobMobility(jobData, tabId) {
   try {
+    // Call seekr profile when sending mobility request; store result for sidebar
+    fetchSeekrProfile()
+      .then((result) => {
+        if (result.success && result.data) {
+          chrome.storage.local.set({ seekrProfile: result.data });
+        }
+      })
+      .catch((err) => console.warn('Seekr profile fetch:', err.message));
+
     // Get user_id and response_id from login response (stored in chrome.storage)
     const storage = await chrome.storage.local.get(['userId', 'responseId']);
     let userId = storage.userId;
