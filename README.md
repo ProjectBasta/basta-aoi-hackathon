@@ -28,23 +28,36 @@ A Chrome extension that collects job information from multiple job board sites i
 
 1. **Download or Clone** this repository to your local machine
 
-2. **Open Chrome Extensions Page**:
+2. **Set up Environment Variables**:
+   - Copy `.env.example` to `.env`: `cp .env.example .env`
+   - Open `.env` and replace `your_api_token_here` with your actual API token for `AOI_HACKATHON_API_TOKEN`
+   - **Important**: Never commit the `.env` file to version control (it's already in `.gitignore`)
+
+3. **Build the Extension**:
+   - Run the build script to inject the API token into the source code:
+     ```bash
+     npm run build
+     ```
+   - Or directly: `node build.js`
+   - This will replace the placeholder `{{AOI_HACKATHON_API_TOKEN}}` in the code with your actual token
+
+4. **Open Chrome Extensions Page**:
    - Navigate to `chrome://extensions/` in your Chrome browser
    - Or go to Chrome Menu → More Tools → Extensions
 
-3. **Enable Developer Mode**:
+5. **Enable Developer Mode**:
    - Toggle the "Developer mode" switch in the top right corner
 
-4. **Load the Extension**:
+6. **Load the Extension**:
    - Click "Load unpacked"
    - Select the folder containing this extension (the folder with `manifest.json`)
 
-5. **Add Extension Icons** (Optional):
+7. **Add Extension Icons** (Optional):
    - The extension requires icon files at `icons/icon16.png`, `icons/icon48.png`, and `icons/icon128.png`
    - You can create simple icons or use placeholder images
    - If icons are missing, the extension will still work but may show default Chrome icons
 
-6. **Pin the Extension** (Recommended):
+8. **Pin the Extension** (Recommended):
    - Click the puzzle piece icon (🧩) in the Chrome toolbar to open the extensions menu
    - Find "Basta Job Assistant" in the list
    - Click the pin icon (📌) next to the extension name
@@ -107,6 +120,11 @@ The extension will automatically:
 
 ```
 ├── manifest.json              # Extension manifest (Manifest V3)
+├── package.json               # Node.js package file with build scripts
+├── build.js                   # Build script to inject environment variables
+├── .env.example               # Example environment file (copy to .env)
+├── .env                        # Environment variables (not committed, add your token here)
+├── .gitignore                  # Git ignore file (includes .env)
 ├── content/
 │   └── process.js           # Content script for multiple job board sites
 ├── background/
@@ -203,12 +221,37 @@ The extension requires the following permissions:
 
 ## Development
 
-To modify the extension:
+### Building the Extension
+
+Before loading the extension in Chrome, you must build it to inject the API token:
+
+1. **Set up your environment**:
+   ```bash
+   cp .env.example .env
+   # Edit .env and add your API token
+   ```
+
+2. **Run the build script**:
+   ```bash
+   npm run build
+   # or
+   node build.js
+   ```
+
+3. **Load/Reload the extension**:
+   - Go to `chrome://extensions/`
+   - Click the refresh icon on the extension card
+   - Test your changes
+
+**Note**: You must run the build script every time you change the API token in `.env` or after pulling changes that modify `background.js`.
+
+### Making Changes
 
 1. Make changes to the relevant files
-2. Go to `chrome://extensions/`
-3. Click the refresh icon on the extension card
-4. Test your changes
+2. If you modified `background.js` or changed the API token, run `npm run build`
+3. Go to `chrome://extensions/`
+4. Click the refresh icon on the extension card
+5. Test your changes
 
 ## Notes
 

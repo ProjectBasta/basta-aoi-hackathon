@@ -386,7 +386,8 @@ async function fetchJobMobility(jobData, tabId) {
     const response = await fetch('https://aoi-hackathon.projectbasta.com/job/mobility', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Authorization': 'hsy79jovh9sy973hfs80yj3upjgktf8'
       },
       body: JSON.stringify(payload)
     });
@@ -431,7 +432,8 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
       const response = await fetch(`https://aoi-hackathon.projectbasta.com/job/mobility?token=${encodeURIComponent(token)}&response_id=${encodeURIComponent(responseId)}`, {
         method: 'GET',
         headers: {
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
+          'Authorization': 'hsy79jovh9sy973hfs80yj3upjgktf8'
         }
       });
 
