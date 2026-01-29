@@ -873,6 +873,35 @@
   }
   let apiCallMadeForCurrentPage = false;
   let currentPageUrl = location.href;
+  let mobilityRequestInProgress = false;
+  let currentDisplayedJob = null; // { companyName, jobTitle } when we have full content shown
+
+  function hasCompleteMobilityData(mobilityData) {
+    if (!mobilityData || !mobilityData.job_mobility) return false;
+    const status = mobilityData.job_mobility.status;
+    return status === 'completed' || status === undefined;
+  }
+
+  function renderLoadingOnly(message = 'Loading job insights...') {
+    return `
+      <div class="basta-sidebar-content">
+        <div class="basta-sidebar-loading-block">
+          <div class="basta-sidebar-spinner"><span class="basta-sidebar-spinner-circle"></span><span>${escapeHtml(message)}</span></div>
+        </div>
+      </div>
+    `;
+  }
+
+  function bodyHasExistingJobContent(bodyEl) {
+    return bodyEl && bodyEl.querySelector('.basta-sidebar-content .basta-sidebar-field');
+  }
+
+  function jobHasChanged(freshJobData) {
+    if (!currentDisplayedJob) return true;
+    const sameCompany = (currentDisplayedJob.companyName || '') === (freshJobData.companyName || '');
+    const sameTitle = (currentDisplayedJob.jobTitle || '') === (freshJobData.jobTitle || '');
+    return !sameCompany || !sameTitle;
+  }
 
   function createSidebarHTML(jobData, mobilityData) {
     if (!jobData || (!jobData.jobTitle && !jobData.companyName)) {
@@ -887,19 +916,22 @@
     const companyLink = companySearchUrl(jobData.companyName);
     const overallBadgeHtml = mobilityData?.job_mobility ? renderBadgeHtml(mobilityData.job_mobility.overall_badge) : renderBadgeHtml(null);
 
-    // Show available data even when status is in_progress
+    // Only show mobility content when we have complete data (status completed)
     let mobilityHTML = '';
-    if (mobilityData && mobilityData.job_mobility) {
-      // Show available data even if status is in_progress
+    let thisRoleAtCompanyHtml = '';
+    if (mobilityData && mobilityData.job_mobility && hasCompleteMobilityData(mobilityData)) {
+      const data = mobilityData.job_mobility;
+      thisRoleAtCompanyHtml = `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">This role at this company:</div>
+          <div class="basta-sidebar-value basta-badges-wrap">
+            <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
+            <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
+            <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
+          </div>
+        </div>
+      `;
       mobilityHTML = createMobilityHTML(mobilityData, companyName, companyLink, jobData.compensation);
-      
-      // Show loading indicator if still in progress
-      if (mobilityData.job_mobility.status === 'in_progress') {
-        mobilityHTML += '<div class="basta-sidebar-spinner"><span class="basta-sidebar-spinner-circle"></span><span>Loading more data...</span></div>';
-      }
-    } else if (!mobilityData || (mobilityData.status && mobilityData.status === 'in_progress')) {
-      // Show spinner only if no data at all
-      mobilityHTML = '<div class="basta-sidebar-spinner"><span class="basta-sidebar-spinner-circle"></span><span>Loading job mobility data...</span></div>';
     }
 
     return `
@@ -911,10 +943,8 @@
             ${overallBadgeHtml}
           </div>
         </div>
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Title</div>
-          <div class="basta-sidebar-value">${escapeHtml(jobData.jobTitle || 'Not available')}</div>
-        </div>
+        ${thisRoleAtCompanyHtml}
+      
         ${mobilityHTML}
       </div>
     `;
@@ -924,24 +954,6 @@
     // Handle both direct job_mobility object and nested structure
     const data = mobilityData.job_mobility || mobilityData || {};
     let html = '';
-
-    if (data.primary_industry) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Industry</div>
-          <div class="basta-sidebar-value">${escapeHtml(data.primary_industry)}</div>
-        </div>
-      `;
-    }
-
-    if (data.skills && data.skills.length > 0) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Skills that will help you succeed in this role</div>
-          <div class="basta-sidebar-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
-        </div>
-      `;
-    }
 
     // Always show Required Education (even if empty)
     html += `
@@ -963,18 +975,6 @@
         <div class="basta-sidebar-value basta-compensation-row">
           <span class="basta-compensation-text">${pageCompText || 'Not on page'}</span>
           ${compIndicatorHtml}
-        </div>
-      </div>
-    `;
-
-    // Always show What this company is known for (badges; overall is next to company name)
-    html += `
-      <div class="basta-sidebar-field">
-        <div class="basta-sidebar-label">What this company is known for</div>
-        <div class="basta-sidebar-value basta-badges-wrap">
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Early Career</span>${renderBadgeHtml(data.badge_early_career)}</div>
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Growth</span>${renderBadgeHtml(data.badge_growth)}</div>
-          <div class="basta-badges-row"><span class="basta-badges-row-label">Stability</span>${renderBadgeHtml(data.badge_stability)}</div>
         </div>
       </div>
     `;
@@ -1062,6 +1062,16 @@
               ${data.consider.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
             </ul>
           </div>
+        </div>
+      `;
+    }
+
+    // Skills at the bottom
+    if (data.skills && data.skills.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Skills that will help you succeed in this role</div>
+          <div class="basta-sidebar-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
         </div>
       `;
     }
@@ -1343,6 +1353,13 @@
         font-size: 14px;
       }
 
+      #${SIDEBAR_ID} .basta-sidebar-loading-block {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 120px;
+        padding: 24px;
+      }
       #${SIDEBAR_ID} .basta-sidebar-spinner {
         display: flex;
         align-items: center;
@@ -1363,14 +1380,17 @@
         border-top-color: #233B48;
         border-radius: 50%;
         flex-shrink: 0;
-        animation: basta-spin 0.85s linear infinite;
-        transform: translateZ(0);
-        will-change: transform;
+        -webkit-animation: basta-spin 0.8s linear infinite;
+        animation: basta-spin 0.8s linear infinite;
       }
 
+      @-webkit-keyframes basta-spin {
+        0% { -webkit-transform: rotate(0deg); }
+        100% { -webkit-transform: rotate(360deg); }
+      }
       @keyframes basta-spin {
-        from { transform: translateZ(0) rotate(0deg); }
-        to { transform: translateZ(0) rotate(360deg); }
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
       }
 
       #${SIDEBAR_ID} .basta-company-link {
@@ -1640,8 +1660,9 @@
   }
 
   function createSidebar() {
-    chrome.storage.local.get(['sidebarVisible'], (result) => {
-      if (result.sidebarVisible === false) {
+    chrome.storage.local.get(['authToken', 'tokenExpiration', 'sidebarVisible'], (result) => {
+      const isLoggedIn = result.authToken && result.tokenExpiration && Date.now() < result.tokenExpiration;
+      if (!isLoggedIn || result.sidebarVisible !== true) {
         removeSidebar();
         return;
       }
@@ -1783,49 +1804,97 @@
       if (!bodyElement) return;
 
       if (!isLoggedIn) {
-        bodyElement.innerHTML = `
-          <div class="basta-sidebar-empty">
-            <p>Sign in to see job insights.</p>
-            <p style="margin-top: 12px; font-size: 13px; color: #666;">Click <strong>☰ Menu</strong> above to log in.</p>
-          </div>
-        `;
+        removeSidebar();
         return;
       }
 
-      // Always extract fresh job data from current page (including salary/compensation) when job may have changed
+      // Extract fresh job data from current page; fall back to stored job if extraction returns nothing (e.g. DOM not ready)
       const freshJobData = extractJobInfo();
       if (location.href !== currentPageUrl) {
         currentPageUrl = location.href;
         apiCallMadeForCurrentPage = false;
       }
 
-      if (!freshJobData || (!freshJobData.jobTitle && !freshJobData.companyName)) {
-        bodyElement.innerHTML = `
-          <div class="basta-sidebar-empty">
-            <p>No Job information available.</p>
-          </div>
-        `;
+      const hasFreshJob = freshJobData && (freshJobData.jobTitle || freshJobData.companyName);
+
+      if (!hasFreshJob) {
+        // Fall back to stored job so we still trigger the API and can show data once it arrives
+        chrome.runtime.sendMessage({ action: 'getJobInfo' }, (storedJob) => {
+          if (!sidebar.isConnected) return;
+          const bodyEl = sidebar.querySelector('.basta-sidebar-body');
+          if (!bodyEl) return;
+          if (chrome.runtime.lastError) {
+            bodyEl.innerHTML = `<div class="basta-sidebar-empty"><p>No Job information available.</p></div>`;
+            return;
+          }
+          if (storedJob && (storedJob.jobTitle || storedJob.companyName)) {
+            chrome.runtime.sendMessage({ action: 'getMobilityForCurrentTab' }, (mobilityData) => {
+              if (!sidebar.isConnected) return;
+              const el = sidebar.querySelector('.basta-sidebar-body');
+              if (!el) return;
+              const hasComplete = hasCompleteMobilityData(mobilityData);
+              const hasExisting = bodyHasExistingJobContent(el);
+              const jobChanged = jobHasChanged(storedJob);
+              // Only show content when data is for this job; never show old data with new company name
+              if (hasComplete && !jobChanged) {
+                currentDisplayedJob = { companyName: storedJob.companyName, jobTitle: storedJob.jobTitle };
+                el.innerHTML = createSidebarHTML(storedJob, mobilityData);
+              } else if (jobChanged) {
+                el.innerHTML = renderLoadingOnly('Fetching data for this job. Previous data is not shown.');
+              } else if (hasExisting && !hasComplete) {
+                el.innerHTML = renderLoadingOnly('Fetching data for this job. Previous data is not shown.');
+              } else {
+                el.innerHTML = renderLoadingOnly();
+              }
+            });
+            if (!apiCallMadeForCurrentPage || forceApiCall) {
+              if (!mobilityRequestInProgress) {
+                mobilityRequestInProgress = true;
+                apiCallMadeForCurrentPage = true;
+                chrome.runtime.sendMessage({ action: 'fetchJobMobility', jobData: storedJob });
+              }
+            }
+          } else {
+            bodyEl.innerHTML = `<div class="basta-sidebar-empty"><p>No Job information available.</p></div>`;
+          }
+        });
         return;
       }
 
       // Save fresh job data so popup and storage stay in sync (compensation included)
       saveJobInfo(freshJobData);
 
-      // Get mobility for this tab and render with fresh job data
+      // Get mobility for this tab - only show full content when data is complete; keep old data if job changed until new data arrives
       chrome.runtime.sendMessage({ action: 'getMobilityForCurrentTab' }, (mobilityData) => {
         if (!sidebar.isConnected) return;
         const bodyEl = sidebar.querySelector('.basta-sidebar-body');
         if (!bodyEl) return;
-        bodyEl.innerHTML = createSidebarHTML(freshJobData, mobilityData || { status: 'in_progress' });
+        const hasComplete = hasCompleteMobilityData(mobilityData);
+        const hasExisting = bodyHasExistingJobContent(bodyEl);
+        const jobChanged = jobHasChanged(freshJobData);
+        // Only show content when data is for this job; never show old data with new company name
+        if (hasComplete && !jobChanged) {
+          currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle };
+          bodyEl.innerHTML = createSidebarHTML(freshJobData, mobilityData);
+        } else if (jobChanged) {
+          bodyEl.innerHTML = renderLoadingOnly('Fetching data for this job. Previous data is not shown.');
+        } else if (hasExisting && !hasComplete) {
+          bodyEl.innerHTML = renderLoadingOnly('Fetching data for this job. Previous data is not shown.');
+        } else {
+          bodyEl.innerHTML = renderLoadingOnly();
+        }
       });
 
-      // Trigger API call for job mobility only if not already made for this page
+      // Trigger API call only if not already made and no request in progress
       if (!apiCallMadeForCurrentPage || forceApiCall) {
-        apiCallMadeForCurrentPage = true;
-        chrome.runtime.sendMessage({
-          action: 'fetchJobMobility',
-          jobData: freshJobData
-        });
+        if (!mobilityRequestInProgress) {
+          mobilityRequestInProgress = true;
+          apiCallMadeForCurrentPage = true;
+          chrome.runtime.sendMessage({
+            action: 'fetchJobMobility',
+            jobData: freshJobData
+          });
+        }
       }
     });
   }
@@ -1834,32 +1903,36 @@
     if (sidebarInitialized) return;
     sidebarInitialized = true;
 
-    // Create sidebar after a short delay to ensure page is ready
+    // Only create sidebar when user is logged in and has chosen to show it (via popup)
     setTimeout(() => {
-      createSidebar();
+      chrome.storage.local.get(['authToken', 'tokenExpiration', 'sidebarVisible'], (r) => {
+        const isLoggedIn = r.authToken && r.tokenExpiration && Date.now() < r.tokenExpiration;
+        if (!isLoggedIn) return; // Don't show sidebar when not logged in
+        if (r.sidebarVisible !== true) return; // User must enable sidebar in popup
+        createSidebar();
+      });
     }, 1000);
 
     // Listen for storage changes to update sidebar
     chrome.storage.onChanged.addListener((changes, areaName) => {
       if (areaName === 'local') {
-        // Handle logout - update sidebar to show sign-in prompt (sidebar stays)
+        // Handle logout - remove sidebar entirely (login only via popup)
         if (changes.authToken && !changes.authToken.newValue) {
-          const sidebar = document.getElementById(SIDEBAR_ID);
-          if (sidebar) loadSidebarContent();
+          removeSidebar();
           return;
         }
 
-        // Handle login or job info updates
-        // Only update UI, don't trigger new API calls on storage changes
+        // Handle login or job info updates - only show sidebar when logged in and sidebarVisible
         if (changes.jobMobilityByTab || changes.lastJobMobility) {
-          // Update UI with fresh job data (including compensation) + new mobility data
           const sidebar = document.getElementById(SIDEBAR_ID);
           if (sidebar) {
             const bodyElement = sidebar.querySelector('.basta-sidebar-body');
             if (bodyElement) {
               const freshJobData = extractJobInfo();
               chrome.runtime.sendMessage({ action: 'getMobilityForCurrentTab' }, (mobilityData) => {
-                if (freshJobData && (freshJobData.jobTitle || freshJobData.companyName) && mobilityData) {
+                if (!freshJobData || (!freshJobData.jobTitle && !freshJobData.companyName)) return;
+                if (mobilityData && hasCompleteMobilityData(mobilityData)) {
+                  currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle };
                   bodyElement.innerHTML = createSidebarHTML(freshJobData, mobilityData);
                 }
               });
@@ -1868,9 +1941,13 @@
         } else if (changes.sidebarVisible && changes.sidebarVisible.newValue === false) {
           removeSidebar();
         } else if (changes.jobInfoByTab || changes.lastJobInfo || changes.authToken || changes.tokenExpiration) {
-          // Check if sidebar exists, if not create it (only when sidebar is enabled)
-          chrome.storage.local.get(['sidebarVisible'], (r) => {
-            if (r.sidebarVisible === false) return;
+          chrome.storage.local.get(['authToken', 'tokenExpiration', 'sidebarVisible'], (r) => {
+            const isLoggedIn = r.authToken && r.tokenExpiration && Date.now() < r.tokenExpiration;
+            if (!isLoggedIn) {
+              removeSidebar();
+              return;
+            }
+            if (r.sidebarVisible !== true) return;
             const sidebar = document.getElementById(SIDEBAR_ID);
             if (sidebar) {
               loadSidebarContent(false);
@@ -1882,19 +1959,21 @@
       }
     });
 
-    // Also listen for URL changes (for SPA navigation)
+    // Also listen for URL changes (for SPA navigation) - debounce so we only trigger one API call per navigation
     let lastUrl = location.href;
+    let urlChangeTimeoutId = null;
     new MutationObserver(() => {
       const url = location.href;
       if (url !== lastUrl) {
         lastUrl = url;
         currentPageUrl = url;
-        apiCallMadeForCurrentPage = false; // Reset flag on URL change
-        setTimeout(() => {
+        apiCallMadeForCurrentPage = false;
+        mobilityRequestInProgress = false;
+        if (urlChangeTimeoutId) clearTimeout(urlChangeTimeoutId);
+        urlChangeTimeoutId = setTimeout(() => {
+          urlChangeTimeoutId = null;
           const sidebar = document.getElementById(SIDEBAR_ID);
-          if (sidebar) {
-            loadSidebarContent(true); // Force API call on URL change (page refresh/navigation)
-          }
+          if (sidebar) loadSidebarContent(true);
         }, 2000);
       }
     }).observe(document, { subtree: true, childList: true });
@@ -1910,24 +1989,29 @@
     }
 
     if (request.action === 'setSidebarVisible') {
-      const visible = request.visible !== false;
+      const visible = request.visible === true;
       chrome.storage.local.set({ sidebarVisible: visible });
       if (!visible) {
         removeSidebar();
       } else {
-        const sidebar = document.getElementById(SIDEBAR_ID);
-        if (sidebar) {
-          toggleSidebar(true, true);
-        } else {
-          createSidebar();
-        }
+        chrome.storage.local.get(['authToken', 'tokenExpiration'], (r) => {
+          const isLoggedIn = r.authToken && r.tokenExpiration && Date.now() < r.tokenExpiration;
+          if (!isLoggedIn) return; // Sidebar only when logged in
+          const sidebar = document.getElementById(SIDEBAR_ID);
+          if (sidebar) {
+            toggleSidebar(true, true);
+          } else {
+            createSidebar();
+          }
+        });
       }
       sendResponse({ success: true });
       return false;
     }
 
     if (request.action === 'jobMobilityUpdate') {
-      // Update sidebar with fresh job data (including compensation) + mobility data
+      mobilityRequestInProgress = false;
+
       const sidebar = document.getElementById(SIDEBAR_ID);
       if (!sidebar) return;
 
@@ -1939,9 +2023,12 @@
 
       if (request.success && request.data) {
         const mobilityData = request.data.job_mobility ? request.data : { job_mobility: request.data };
-        bodyElement.innerHTML = createSidebarHTML(freshJobData, mobilityData);
+        if (hasCompleteMobilityData(mobilityData)) {
+          currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle };
+          bodyElement.innerHTML = createSidebarHTML(freshJobData, mobilityData);
+        }
       } else if (request.error) {
-        bodyElement.innerHTML = createSidebarHTML(freshJobData, { status: 'in_progress' }) +
+        bodyElement.innerHTML = renderLoadingOnly() +
           `<div class="basta-sidebar-error" style="padding: 10px; color: #d32f2f; font-size: 12px;">Error: ${escapeHtml(request.error)}</div>`;
       }
     }
@@ -1949,9 +2036,10 @@
 
   // Extract and save job info when page loads
   function init() {
-    // Reset API call flag on page load
+    // Reset API call flags on page load
     currentPageUrl = location.href;
     apiCallMadeForCurrentPage = false;
+    mobilityRequestInProgress = false;
 
     // Wait for page to fully load
     if (document.readyState === 'loading') {
@@ -1968,15 +2056,19 @@
       }, 2000);
     }
 
-    // Also listen for URL changes (LinkedIn uses SPA navigation)
-    let lastUrl = location.href;
+    // Also listen for URL changes (LinkedIn uses SPA navigation) - debounce so we only save once per navigation
+    let lastUrlInit = location.href;
+    let urlSaveTimeoutId = null;
     new MutationObserver(() => {
       const url = location.href;
-      if (url !== lastUrl) {
-        lastUrl = url;
+      if (url !== lastUrlInit) {
+        lastUrlInit = url;
         currentPageUrl = url;
-        apiCallMadeForCurrentPage = false; // Reset flag on URL change
-        setTimeout(() => {
+        apiCallMadeForCurrentPage = false;
+        mobilityRequestInProgress = false;
+        if (urlSaveTimeoutId) clearTimeout(urlSaveTimeoutId);
+        urlSaveTimeoutId = setTimeout(() => {
+          urlSaveTimeoutId = null;
           const jobData = extractJobInfo();
           saveJobInfo(jobData);
         }, 2000);

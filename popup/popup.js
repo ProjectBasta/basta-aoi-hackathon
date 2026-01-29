@@ -174,10 +174,10 @@ document.addEventListener('DOMContentLoaded', () => {
   function showJobInfoScreen() {
     loginScreen.style.display = 'none';
     jobInfoScreen.style.display = 'block';
-    // Load sidebar toggle state
+    // Load sidebar toggle state (default off so user opts in to show sidebar)
     chrome.storage.local.get(['sidebarVisible'], (result) => {
       if (sidebarToggle) {
-        sidebarToggle.checked = result.sidebarVisible !== false;
+        sidebarToggle.checked = result.sidebarVisible === true;
       }
     });
     // Load job info when showing the screen
@@ -322,10 +322,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ${overallBadgeHtml}
         </div>
       </div>
-      <div class="job-field">
-        <div class="job-field-label">Title</div>
-        <div class="job-field-value">${escapeHtml(jobData.jobTitle || 'Not available')}</div>
-      </div>
+      
     `;
 
     // Show available data even when status is in_progress
@@ -365,14 +362,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const data = mobilityData.job_mobility || mobilityData || {};
     let html = '';
 
-    if (data.primary_industry) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Industry</div>
-          <div class="job-field-value">${escapeHtml(data.primary_industry)}</div>
-        </div>
-      `;
-    }
+    
 
     if (data.skills && data.skills.length > 0) {
       html += `

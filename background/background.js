@@ -165,6 +165,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   });
 });
 
+// Limit one mobility request in progress per tab
+const mobilityFetchInProgress = new Set();
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'updateBadgeForLogin') {
     // Update badge based on login status
@@ -314,22 +317,24 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'fetchJobMobility') {
-    // Handle job mobility API call
-    // Get tab ID from sender or from active tab
     let tabId = sender.tab?.id;
-    if (!tabId) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs.length > 0) {
-          fetchJobMobility(request.jobData, tabs[0].id);
-        } else {
-          fetchJobMobility(request.jobData, null);
-        }
-      });
+    const doFetch = (targetTabId) => {
+      if (targetTabId != null && mobilityFetchInProgress.has(targetTabId)) {
+        sendResponse({ success: true, message: 'Request already in progress for this tab' });
+        return;
+      }
+      if (targetTabId != null) mobilityFetchInProgress.add(targetTabId);
+      fetchJobMobility(request.jobData, targetTabId);
+      sendResponse({ success: true, message: 'Job mobility fetch initiated' });
+    };
+    if (tabId) {
+      doFetch(tabId);
     } else {
-      fetchJobMobility(request.jobData, tabId);
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        doFetch(tabs.length > 0 ? tabs[0].id : null);
+      });
     }
-    sendResponse({ success: true, message: 'Job mobility fetch initiated' });
-    return true; // Indicates we will send a response asynchronously
+    return true;
   }
 });
 
@@ -432,7 +437,7 @@ async function fetchJobMobility(jobData, tabId) {
     pollJobMobilityStatus(token, responseId, tabId);
   } catch (error) {
     console.error('Error fetching job mobility:', error);
-    // Send error message to content script
+    if (tabId) mobilityFetchInProgress.delete(tabId);
     if (tabId) {
       chrome.tabs.sendMessage(tabId, {
         action: 'jobMobilityUpdate',
@@ -505,6 +510,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
         // If status is completed or max attempts reached, stop polling
         if (mobilityData.job_mobility?.status === 'completed' || attempts >= maxAttempts) {
           clearInterval(pollInterval);
+          if (tabId) mobilityFetchInProgress.delete(tabId);
           return;
         }
       } else {
@@ -512,6 +518,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
         if (attempts >= maxAttempts) {
           clearInterval(pollInterval);
           if (tabId) {
+            mobilityFetchInProgress.delete(tabId);
             chrome.tabs.sendMessage(tabId, {
               action: 'jobMobilityUpdate',
               success: false,
@@ -526,6 +533,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
       if (attempts >= maxAttempts) {
         clearInterval(pollInterval);
         if (tabId) {
+          mobilityFetchInProgress.delete(tabId);
           chrome.tabs.sendMessage(tabId, {
             action: 'jobMobilityUpdate',
             success: false,
