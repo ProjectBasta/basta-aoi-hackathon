@@ -426,11 +426,8 @@ document.addEventListener("DOMContentLoaded", () => {
       ? renderBadgeHtml(mobilityData.job_mobility.overall_badge)
       : renderBadgeHtml(null)
 
-    // Same order as sidebar: Your seekr profile (Top Drivers), Company, This role at this company, Compensation, then rest
+    // Order: Company, This role, Compensation, Your seekr profile (Top Drivers), then rest
     let html = ""
-    if (seekrProfile) {
-      html += renderSeekrProfileHTML(seekrProfile)
-    }
     html += `
       <div class="job-field">
         <div class="job-field-label">Company</div>
@@ -451,6 +448,7 @@ document.addEventListener("DOMContentLoaded", () => {
         companyName,
         companyLink,
         jobData.compensation,
+        seekrProfile,
       )
 
       // Show loading indicator if still in progress
@@ -466,13 +464,16 @@ document.addEventListener("DOMContentLoaded", () => {
       !mobilityData ||
       (mobilityData.status && mobilityData.status === "in_progress")
     ) {
-      // Show spinner only if no data at all
+      // Show spinner only if no data at all; still show seekr profile below
       html += `
         <div class="job-field" style="text-align: center; padding: 20px;">
           <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #131F39; border-radius: 50%; animation: spin 1s linear infinite;"></div>
           <div style="margin-top: 10px; color: #666;">Loading job mobility data...</div>
         </div>
       `
+      if (seekrProfile) {
+        html += renderSeekrProfileHTML(seekrProfile)
+      }
     }
 
     jobInfoContainer.innerHTML = html
@@ -487,8 +488,9 @@ document.addEventListener("DOMContentLoaded", () => {
     companyName,
     companyLink,
     pageCompensation,
+    seekrProfile,
   ) {
-    // Same order as sidebar: This role at this company, Compensation, Recommendation, What works well, Things to consider, Skills, Pathways
+    // Same order as sidebar: This role, Compensation, Your seekr profile (Top Drivers), Recommendation, What works well, etc.
     const data = mobilityData.job_mobility || mobilityData || {}
     let html = ""
 
@@ -519,6 +521,11 @@ document.addEventListener("DOMContentLoaded", () => {
         </div>
       </div>
     `
+
+    // Your seekr profile (Top Drivers) — below compensation
+    if (seekrProfile) {
+      html += renderSeekrProfileHTML(seekrProfile)
+    }
 
     if (data.recommendation) {
       html += `

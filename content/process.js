@@ -1086,15 +1086,21 @@
     `
   }
 
-  function setSidebarBodyWithProfile(bodyEl, mainContentHtml) {
+  function setSidebarBodyWithProfile(bodyEl, mainContentHtmlOrJobData, mobilityData) {
     if (!bodyEl) return
+    const isJobContent = arguments.length >= 3 && typeof mainContentHtmlOrJobData === 'object' && mainContentHtmlOrJobData !== null
     chrome.storage.local.get(["seekrProfile"], (r) => {
-      const profileHtml = r.seekrProfile ? renderSeekrProfileHTML(r.seekrProfile) : ""
-      bodyEl.innerHTML = profileHtml + mainContentHtml
+      const profile = r.seekrProfile || null
+      if (isJobContent) {
+        bodyEl.innerHTML = createSidebarHTML(mainContentHtmlOrJobData, mobilityData, profile)
+      } else {
+        const profileHtml = profile ? renderSeekrProfileHTML(profile) : ""
+        bodyEl.innerHTML = profileHtml + mainContentHtmlOrJobData
+      }
     })
   }
 
-  function createSidebarHTML(jobData, mobilityData) {
+  function createSidebarHTML(jobData, mobilityData, seekrProfile) {
     if (!jobData || (!jobData.jobTitle && !jobData.companyName)) {
       return `
         <div class="basta-sidebar-empty">
@@ -1142,6 +1148,8 @@
       mobilityHTML = createMobilityHTML(mobilityData, companyName, companyLink, jobData.compensation);
     }
 
+    const seekrProfileHtml = seekrProfile ? renderSeekrProfileHTML(seekrProfile) : ''
+
     return `
       <div class="basta-sidebar-content">
         <div class="basta-sidebar-field">
@@ -1153,6 +1161,7 @@
         </div>
         ${thisRoleAtCompanyHtml}
         ${compensationHtml}
+        ${seekrProfileHtml}
         ${mobilityHTML}
       </div>
     `
@@ -2049,7 +2058,7 @@
               // Only show content when data is for this job; never show old data with new company name
               if (hasComplete && !jobChanged) {
                 currentDisplayedJob = { companyName: storedJob.companyName, jobTitle: storedJob.jobTitle };
-                setSidebarBodyWithProfile(el, createSidebarHTML(storedJob, mobilityData));
+                setSidebarBodyWithProfile(el, storedJob, mobilityData);
               } else if (jobChanged) {
                 setSidebarBodyWithProfile(el, renderLoadingOnly('Fetching data for this job. '));
               } else if (hasExisting && !hasComplete) {
@@ -2085,7 +2094,7 @@
         const jobChanged = jobHasChanged(freshJobData);
         if (hasComplete && !jobChanged) {
           currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle };
-          setSidebarBodyWithProfile(bodyEl, createSidebarHTML(freshJobData, mobilityData));
+          setSidebarBodyWithProfile(bodyEl, freshJobData, mobilityData);
         } else if (jobChanged) {
           setSidebarBodyWithProfile(bodyEl, renderLoadingOnly('Fetching data for this job.'));
         } else if (hasExisting && !hasComplete) {
@@ -2153,7 +2162,8 @@
                     currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle }
                     setSidebarBodyWithProfile(
                       bodyElement,
-                      createSidebarHTML(freshJobData, mobilityData),
+                      freshJobData,
+                      mobilityData,
                     )
                   }
                 },
@@ -2248,7 +2258,7 @@
           : { job_mobility: request.data }
         if (hasCompleteMobilityData(mobilityData)) {
           currentDisplayedJob = { companyName: freshJobData.companyName, jobTitle: freshJobData.jobTitle }
-          setSidebarBodyWithProfile(bodyElement, createSidebarHTML(freshJobData, mobilityData))
+          setSidebarBodyWithProfile(bodyElement, freshJobData, mobilityData)
         }
       } else if (request.error) {
         setSidebarBodyWithProfile(
