@@ -383,17 +383,30 @@ async function fetchJobMobility(jobData, tabId) {
     };
 
     // Make initial API call to get token
+    const apiToken = 'hsy79jovh9sy973hfs80yj3upjgktf8';
+    
+    if (!apiToken || apiToken === 'hsy79jovh9sy973hfs80yj3upjgktf8') {
+      console.error('API token not set! Please run: npm run build');
+      throw new Error('API token not configured. Please run the build script.');
+    }
+    
+    console.log('Making API call with token:', apiToken ? 'Token present' : 'Token missing');
+    
     const response = await fetch('https://aoi-hackathon.projectbasta.com/job/mobility', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': '{{AOI_HACKATHON_API_TOKEN}}'
+        'X-API-Key': apiToken
       },
       body: JSON.stringify(payload)
     });
 
+    console.log('API Response status:', response.status, response.statusText);
+    
     if (!response.ok) {
-      throw new Error(`API call failed: ${response.statusText}`);
+      const errorText = await response.text().catch(() => '');
+      console.error('API Error Response:', errorText);
+      throw new Error(`API call failed: ${response.status} ${response.statusText}`);
     }
 
     const responseData = await response.json();
@@ -429,16 +442,27 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
     attempts++;
     
     try {
+      const apiToken = 'hsy79jovh9sy973hfs80yj3upjgktf8';
+      
+      if (!apiToken || apiToken === 'hsy79jovh9sy973hfs80yj3upjgktf8') {
+        console.error('API token not set! Please run: npm run build');
+        throw new Error('API token not configured. Please run the build script.');
+      }
+      
       const response = await fetch(`https://aoi-hackathon.projectbasta.com/job/mobility?token=${encodeURIComponent(token)}&response_id=${encodeURIComponent(responseId)}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': '{{AOI_HACKATHON_API_TOKEN}}'
+          'X-API-Key': apiToken
         }
       });
 
+      console.log('Polling API Response status:', response.status, response.statusText);
+
       if (!response.ok) {
-        throw new Error(`Polling failed: ${response.statusText}`);
+        const errorText = await response.text().catch(() => '');
+        console.error('Polling API Error Response:', errorText);
+        throw new Error(`Polling failed: ${response.status} ${response.statusText}`);
       }
 
       const responseData = await response.json();
