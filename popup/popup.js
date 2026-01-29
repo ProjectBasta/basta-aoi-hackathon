@@ -302,7 +302,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // Show available data even when status is in_progress
     if (mobilityData && mobilityData.job_mobility) {
       // Show available data even if status is in_progress
-      html += createMobilityHTML(mobilityData.job_mobility, companyName, companyLink);
+      // Pass the full mobilityData object, function will extract job_mobility
+      html += createMobilityHTML(mobilityData, companyName, companyLink);
       
       // Show loading indicator if still in progress
       if (mobilityData.job_mobility.status === 'in_progress') {
@@ -330,7 +331,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // The API call should only happen when the page is first loaded/refreshed
   }
 
-  function createMobilityHTML(data, companyName, companyLink) {
+  function createMobilityHTML(mobilityData, companyName, companyLink) {
+    // Handle both direct job_mobility object and nested structure
+    const data = mobilityData.job_mobility || mobilityData || {};
     let html = '';
 
     if (data.primary_industry) {
@@ -351,89 +354,90 @@ document.addEventListener('DOMContentLoaded', () => {
       `;
     }
 
-    if (data.education) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Required Education:</div>
-          <div class="job-field-value">${escapeHtml(data.education)}</div>
-        </div>
-      `;
-    }
+    // Always show Required Education (even if empty)
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Required Education:</div>
+        <div class="job-field-value">${escapeHtml(data.education || 'Not available')}</div>
+      </div>
+    `;
 
-    if (data.wage) {
-      const wage = data.wage;
-      const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
-      const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
-      const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Compensation:</div>
-          <div class="job-field-value">Low${low}  Median ${median}  High ${high}</div>
-        </div>
-      `;
-    }
+    // Always show Compensation (even if empty)
+    const wage = data.wage || {};
+    const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
+    const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
+    const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Compensation:</div>
+        <div class="job-field-value">Low${low}  Median ${median}  High ${high}</div>
+      </div>
+    `;
 
-    if (data.overall_badge || data.badge_early_career || data.badge_growth || data.badge_stability) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Badges:</div>
-          <div class="job-field-value">
-            Overall ${escapeHtml(data.overall_badge || 'N/A')}<br>
-            Early Career ${escapeHtml(data.badge_early_career || 'N/A')}<br>
-            Growth ${escapeHtml(data.badge_growth || 'N/A')}<br>
-            Stability ${escapeHtml(data.badge_stability || 'N/A')}
-          </div>
+    // Always show Badges (even if empty)
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Badges:</div>
+        <div class="job-field-value">
+          Overall ${escapeHtml(data.overall_badge || 'N/A')}<br>
+          Early Career ${escapeHtml(data.badge_early_career || 'N/A')}<br>
+          Growth ${escapeHtml(data.badge_growth || 'N/A')}<br>
+          Stability ${escapeHtml(data.badge_stability || 'N/A')}
         </div>
-      `;
-    }
+      </div>
+    `;
 
-    if (data.badge_early_career_company && data.badge_early_career_company.length > 0) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Early Career Companies:</div>
-          <div class="job-field-value">${data.badge_early_career_company.map(c => {
-            const companyName = escapeHtml(c);
-            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-            return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
-          }).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Early Career Companies (even if empty)
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Early Career Companies:</div>
+        <div class="job-field-value">${data.badge_early_career_company && data.badge_early_career_company.length > 0
+          ? data.badge_early_career_company.map(c => {
+              const companyName = escapeHtml(c);
+              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+              return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+            }).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
-    if (data.badge_growth_company && data.badge_growth_company.length > 0) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Growth Companies:</div>
-          <div class="job-field-value">${data.badge_growth_company.map(c => {
-            const companyName = escapeHtml(c);
-            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-            return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
-          }).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Growth Companies (even if empty)
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Growth Companies:</div>
+        <div class="job-field-value">${data.badge_growth_company && data.badge_growth_company.length > 0
+          ? data.badge_growth_company.map(c => {
+              const companyName = escapeHtml(c);
+              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+              return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+            }).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
-    if (data.badge_stability_company && data.badge_stability_company.length > 0) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Stability Companies:</div>
-          <div class="job-field-value">${data.badge_stability_company.map(c => {
-            const companyName = escapeHtml(c);
-            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-            return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
-          }).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Stability Companies (even if empty)
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Stability Companies:</div>
+        <div class="job-field-value">${data.badge_stability_company && data.badge_stability_company.length > 0
+          ? data.badge_stability_company.map(c => {
+              const companyName = escapeHtml(c);
+              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+              return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+            }).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
-    if (data.pathways && data.pathways.length > 0) {
-      html += `
-        <div class="job-field">
-          <div class="job-field-label">Pathways:</div>
-          <div class="job-field-value">${data.pathways.map(p => escapeHtml(p)).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Pathways (even if empty)
+    html += `
+      <div class="job-field">
+        <div class="job-field-label">Pathways:</div>
+        <div class="job-field-value">${data.pathways && data.pathways.length > 0
+          ? data.pathways.map(p => escapeHtml(p)).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
     if (data.recommendation) {
       html += `

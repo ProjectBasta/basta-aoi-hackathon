@@ -775,7 +775,8 @@
   }
 
   function createMobilityHTML(mobilityData, companyName, companyLink) {
-    const data = mobilityData.job_mobility || {};
+    // Handle both direct job_mobility object and nested structure
+    const data = mobilityData.job_mobility || mobilityData || {};
     let html = '';
 
     if (data.primary_industry) {
@@ -796,89 +797,90 @@
       `;
     }
 
-    if (data.education) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Required Education:</div>
-          <div class="basta-sidebar-value">${escapeHtml(data.education)}</div>
-        </div>
-      `;
-    }
+    // Always show Required Education (even if empty)
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Required Education:</div>
+        <div class="basta-sidebar-value">${escapeHtml(data.education || 'Not available')}</div>
+      </div>
+    `;
 
-    if (data.wage) {
-      const wage = data.wage;
-      const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
-      const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
-      const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Compensation:</div>
-          <div class="basta-sidebar-value">Low${low}  Median ${median}  High ${high}</div>
-        </div>
-      `;
-    }
+    // Always show Compensation (even if empty)
+    const wage = data.wage || {};
+    const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
+    const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
+    const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Compensation:</div>
+        <div class="basta-sidebar-value">Low${low}  Median ${median}  High ${high}</div>
+      </div>
+    `;
 
-    if (data.overall_badge || data.badge_early_career || data.badge_growth || data.badge_stability) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Badges:</div>
-          <div class="basta-sidebar-value">
-            Overall ${escapeHtml(data.overall_badge || 'N/A')}<br>
-            Early Career ${escapeHtml(data.badge_early_career || 'N/A')}<br>
-            Growth ${escapeHtml(data.badge_growth || 'N/A')}<br>
-            Stability ${escapeHtml(data.badge_stability || 'N/A')}
-          </div>
+    // Always show Badges (even if empty)
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Badges:</div>
+        <div class="basta-sidebar-value">
+          Overall ${escapeHtml(data.overall_badge || 'N/A')}<br>
+          Early Career ${escapeHtml(data.badge_early_career || 'N/A')}<br>
+          Growth ${escapeHtml(data.badge_growth || 'N/A')}<br>
+          Stability ${escapeHtml(data.badge_stability || 'N/A')}
         </div>
-      `;
-    }
+      </div>
+    `;
 
-    if (data.badge_early_career_company && data.badge_early_career_company.length > 0) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Early Career Companies:</div>
-          <div class="basta-sidebar-value">${data.badge_early_career_company.map(c => {
-            const companyName = escapeHtml(c);
-            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-            return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`;
-          }).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Early Career Companies (even if empty)
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Early Career Companies:</div>
+        <div class="basta-sidebar-value">${data.badge_early_career_company && data.badge_early_career_company.length > 0
+          ? data.badge_early_career_company.map(c => {
+              const companyName = escapeHtml(c);
+              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+              return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`;
+            }).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
-    if (data.badge_growth_company && data.badge_growth_company.length > 0) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Growth Companies:</div>
-          <div class="basta-sidebar-value">${data.badge_growth_company.map(c => {
-            const companyName = escapeHtml(c);
-            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-            return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`;
-          }).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Growth Companies (even if empty)
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Growth Companies:</div>
+        <div class="basta-sidebar-value">${data.badge_growth_company && data.badge_growth_company.length > 0
+          ? data.badge_growth_company.map(c => {
+              const companyName = escapeHtml(c);
+              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+              return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`;
+            }).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
-    if (data.badge_stability_company && data.badge_stability_company.length > 0) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Stability Companies:</div>
-          <div class="basta-sidebar-value">${data.badge_stability_company.map(c => {
-            const companyName = escapeHtml(c);
-            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
-            return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`;
-          }).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Stability Companies (even if empty)
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Stability Companies:</div>
+        <div class="basta-sidebar-value">${data.badge_stability_company && data.badge_stability_company.length > 0
+          ? data.badge_stability_company.map(c => {
+              const companyName = escapeHtml(c);
+              const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+              return `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>`;
+            }).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
-    if (data.pathways && data.pathways.length > 0) {
-      html += `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Pathways:</div>
-          <div class="basta-sidebar-value">${data.pathways.map(p => escapeHtml(p)).join(', ')}</div>
-        </div>
-      `;
-    }
+    // Always show Pathways (even if empty)
+    html += `
+      <div class="basta-sidebar-field">
+        <div class="basta-sidebar-label">Pathways:</div>
+        <div class="basta-sidebar-value">${data.pathways && data.pathways.length > 0
+          ? data.pathways.map(p => escapeHtml(p)).join(', ')
+          : 'Not available'}</div>
+      </div>
+    `;
 
     if (data.recommendation) {
       html += `
@@ -1347,7 +1349,9 @@
       chrome.runtime.sendMessage({ action: 'getJobInfo' }, (jobResponse) => {
         if (jobResponse && (jobResponse.jobTitle || jobResponse.companyName)) {
           if (request.success && request.data) {
-            bodyElement.innerHTML = createSidebarHTML(jobResponse, request.data);
+            // Ensure data structure is correct - request.data should have job_mobility
+            const mobilityData = request.data.job_mobility ? request.data : { job_mobility: request.data };
+            bodyElement.innerHTML = createSidebarHTML(jobResponse, mobilityData);
           } else {
             // Show error or keep spinner
             if (request.error) {
