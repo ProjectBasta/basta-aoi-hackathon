@@ -387,7 +387,7 @@ async function fetchJobMobility(jobData, tabId) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'hsy79jovh9sy973hfs80yj3upjgktf8'
+        'Authorization': '{{AOI_HACKATHON_API_TOKEN}}'
       },
       body: JSON.stringify(payload)
     });
@@ -433,7 +433,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': 'hsy79jovh9sy973hfs80yj3upjgktf8'
+          'Authorization': '{{AOI_HACKATHON_API_TOKEN}}'
         }
       });
 
