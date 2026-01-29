@@ -32,14 +32,34 @@ function loadEnvFile() {
   const envContent = fs.readFileSync(envPath, 'utf8');
   const envVars = {};
   
-  envContent.split('\n').forEach(line => {
+  envContent.split('\n').forEach((line, index) => {
     line = line.trim();
     // Skip comments and empty lines
     if (line && !line.startsWith('#')) {
-      const [key, ...valueParts] = line.split('=');
-      if (key && valueParts.length > 0) {
-        envVars[key.trim()] = valueParts.join('=').trim();
+      const equalIndex = line.indexOf('=');
+      if (equalIndex > 0) {
+        const key = line.substring(0, equalIndex).trim();
+        const value = line.substring(equalIndex + 1).trim();
+        if (key && value) {
+          // Remove surrounding quotes if present
+          let cleanValue = value;
+          if ((value.startsWith('"') && value.endsWith('"')) || 
+              (value.startsWith("'") && value.endsWith("'"))) {
+            cleanValue = value.slice(1, -1);
+          }
+          envVars[key] = cleanValue;
+        }
       }
+    }
+  });
+
+  // Debug: log loaded env vars (without showing values)
+  log(`Loaded ${Object.keys(envVars).length} environment variable(s)`, 'green');
+  Object.keys(envVars).forEach(key => {
+    if (key === 'AOI_HACKATHON_API_TOKEN') {
+      log(`  ${key}: ${envVars[key] ? '***' + envVars[key].substring(Math.max(0, envVars[key].length - 4)) : 'NOT SET'}`, 'green');
+    } else {
+      log(`  ${key}: ${envVars[key] ? 'SET' : 'NOT SET'}`, 'green');
     }
   });
 
@@ -54,11 +74,15 @@ function replacePlaceholders(filePath, envVars) {
 
   let content = fs.readFileSync(filePath, 'utf8');
   let modified = false;
+  const placeholderCount = (content.match(/\{\{AOI_HACKATHON_API_TOKEN\}\}/g) || []).length;
 
   // Replace {{AOI_HACKATHON_API_TOKEN}} with actual token
-  if (content.includes('{{AOI_HACKATHON_API_TOKEN}}')) {
+  if (placeholderCount > 0) {
+    log(`Found ${placeholderCount} placeholder(s) in ${path.basename(filePath)}`, 'green');
+    
     if (!envVars.AOI_HACKATHON_API_TOKEN) {
       log(`Error: AOI_HACKATHON_API_TOKEN not found in .env file!`, 'red');
+      log(`Available env vars: ${Object.keys(envVars).join(', ')}`, 'yellow');
       return false;
     }
 
@@ -67,8 +91,18 @@ function replacePlaceholders(filePath, envVars) {
       return false;
     }
 
-    content = content.replace(/\{\{AOI_HACKATHON_API_TOKEN\}\}/g, envVars.AOI_HACKATHON_API_TOKEN);
+    // Remove quotes if present (handles cases like AOI_HACKATHON_API_TOKEN="token" or AOI_HACKATHON_API_TOKEN='token')
+    let tokenValue = envVars.AOI_HACKATHON_API_TOKEN;
+    if ((tokenValue.startsWith('"') && tokenValue.endsWith('"')) || 
+        (tokenValue.startsWith("'") && tokenValue.endsWith("'"))) {
+      tokenValue = tokenValue.slice(1, -1);
+    }
+
+    content = content.replace(/\{\{AOI_HACKATHON_API_TOKEN\}\}/g, tokenValue);
     modified = true;
+    log(`Replaced ${placeholderCount} placeholder(s) with token`, 'green');
+  } else {
+    log(`No placeholders found in ${path.basename(filePath)}`, 'yellow');
   }
 
   if (modified) {
@@ -86,7 +120,6 @@ function main() {
 
   // Load environment variables
   const envVars = loadEnvFile();
-  log(`✓ Loaded environment variables from .env`, 'green');
 
   // Files that may contain placeholders
   const filesToProcess = [
