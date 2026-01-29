@@ -165,6 +165,9 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   });
 });
 
+// Limit one mobility request in progress per tab
+const mobilityFetchInProgress = new Set();
+
 chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   if (request.action === 'updateBadgeForLogin') {
     // Update badge based on login status
@@ -220,24 +223,42 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'getJobInfo') {
-    // Get job info for the current active tab
-    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-      if (tabs.length > 0) {
-        const activeTabId = tabs[0].id;
-        chrome.storage.local.get(['jobInfoByTab', 'lastJobInfo'], (result) => {
-          const jobInfoByTab = result.jobInfoByTab || {};
-          const tabJobInfo = jobInfoByTab[activeTabId];
-          // Return tab-specific info if available, otherwise fallback to lastJobInfo
-          sendResponse(tabJobInfo || result.lastJobInfo || null);
-        });
-      } else {
-        // No active tab, return lastJobInfo
-        chrome.storage.local.get(['lastJobInfo'], (result) => {
-          sendResponse(result.lastJobInfo || null);
-        });
-      }
-    });
+    // Use sender tab when message is from content script (so we get this tab's job info)
+    const tabId = sender.tab ? sender.tab.id : null;
+    function respondWithJobInfo(targetTabId) {
+      chrome.storage.local.get(['jobInfoByTab', 'lastJobInfo'], (result) => {
+        const jobInfoByTab = result.jobInfoByTab || {};
+        const tabJobInfo = targetTabId ? jobInfoByTab[targetTabId] : null;
+        sendResponse(tabJobInfo || result.lastJobInfo || null);
+      });
+    }
+    if (tabId) {
+      respondWithJobInfo(tabId);
+    } else {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        respondWithJobInfo(tabs.length > 0 ? tabs[0].id : null);
+      });
+    }
     return true; // Indicates we will send a response asynchronously
+  }
+
+  if (request.action === 'getMobilityForCurrentTab') {
+    const tabId = sender.tab ? sender.tab.id : null;
+    if (!tabId) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        const targetTabId = tabs.length > 0 ? tabs[0].id : null;
+        chrome.storage.local.get(['jobMobilityByTab'], (result) => {
+          const mobility = targetTabId ? (result.jobMobilityByTab || {})[targetTabId] : null;
+          sendResponse(mobility || null);
+        });
+      });
+    } else {
+      chrome.storage.local.get(['jobMobilityByTab'], (result) => {
+        const mobility = (result.jobMobilityByTab || {})[tabId] || null;
+        sendResponse(mobility);
+      });
+    }
+    return true;
   }
 
   if (request.action === 'clearJobInfo') {
@@ -296,24 +317,62 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
   }
 
   if (request.action === 'fetchJobMobility') {
-    // Handle job mobility API call
-    // Get tab ID from sender or from active tab
     let tabId = sender.tab?.id;
-    if (!tabId) {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs.length > 0) {
-          fetchJobMobility(request.jobData, tabs[0].id);
-        } else {
-          fetchJobMobility(request.jobData, null);
-        }
-      });
+    const doFetch = (targetTabId) => {
+      if (targetTabId != null && mobilityFetchInProgress.has(targetTabId)) {
+        sendResponse({ success: true, message: 'Request already in progress for this tab' });
+        return;
+      }
+      if (targetTabId != null) mobilityFetchInProgress.add(targetTabId);
+      fetchJobMobility(request.jobData, targetTabId);
+      sendResponse({ success: true, message: 'Job mobility fetch initiated' });
+    };
+    if (tabId) {
+      doFetch(tabId);
     } else {
-      fetchJobMobility(request.jobData, tabId);
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        doFetch(tabs.length > 0 ? tabs[0].id : null);
+      });
     }
-    sendResponse({ success: true, message: 'Job mobility fetch initiated' });
-    return true; // Indicates we will send a response asynchronously
+    return true;
+  }
+
+  if (request.action === 'fetchSeekrProfile') {
+    fetchSeekrProfile()
+      .then((result) => sendResponse(result))
+      .catch((err) => sendResponse({ success: false, error: err.message }));
+    return true;
   }
 });
+
+// Seekr profile API: GET /seekr/profile?response_id={{seekr_response_id}}
+const SEEKR_PROFILE_API_BASE = 'https://aoi-hackathon.projectbasta.com';
+
+// Fetch seekr profile for the current user (uses response_id from storage as seekr_response_id)
+async function fetchSeekrProfile() {
+  const storage = await chrome.storage.local.get(['responseId']);
+  const seekrResponseId = storage.responseId;
+  if (!seekrResponseId) {
+    return { success: false, error: 'No response_id available. Sign in first.' };
+  }
+  const url = `${SEEKR_PROFILE_API_BASE}/seekr/profile?response_id=${encodeURIComponent(seekrResponseId)}`;
+  const apiToken = 'hsy79jovh9sy973hfs80yj3upjgktf8';
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-API-Key': apiToken
+    },
+  });
+  if (!response.ok) {
+    const text = await response.text().catch(() => '');
+    throw new Error(`Profile request failed: ${response.status} ${response.statusText}${text ? ' ' + text : ''}`);
+  }
+  const data = await response.json();
+  // Store the inner profile (API may return { data: { top_drivers, ... } } or { top_drivers, ... } directly)
+  const profilePayload = data && typeof data.data !== 'undefined' ? data.data : data;
+  return { success: true, data: profilePayload };
+}
 
 // Generate UUID for user_id and response_id
 function generateUUID() {
@@ -345,6 +404,15 @@ function parseLocationValue(location) {
 // Fetch job mobility data
 async function fetchJobMobility(jobData, tabId) {
   try {
+    // Call seekr profile when sending mobility request; store result for sidebar
+    fetchSeekrProfile()
+      .then((result) => {
+        if (result.success && result.data) {
+          chrome.storage.local.set({ seekrProfile: result.data });
+        }
+      })
+      .catch((err) => console.warn('Seekr profile fetch:', err.message));
+
     // Get user_id and response_id from login response (stored in chrome.storage)
     const storage = await chrome.storage.local.get(['userId', 'responseId']);
     let userId = storage.userId;
@@ -414,7 +482,7 @@ async function fetchJobMobility(jobData, tabId) {
     pollJobMobilityStatus(token, responseId, tabId);
   } catch (error) {
     console.error('Error fetching job mobility:', error);
-    // Send error message to content script
+    if (tabId) mobilityFetchInProgress.delete(tabId);
     if (tabId) {
       chrome.tabs.sendMessage(tabId, {
         action: 'jobMobilityUpdate',
@@ -487,6 +555,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
         // If status is completed or max attempts reached, stop polling
         if (mobilityData.job_mobility?.status === 'completed' || attempts >= maxAttempts) {
           clearInterval(pollInterval);
+          if (tabId) mobilityFetchInProgress.delete(tabId);
           return;
         }
       } else {
@@ -494,6 +563,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
         if (attempts >= maxAttempts) {
           clearInterval(pollInterval);
           if (tabId) {
+            mobilityFetchInProgress.delete(tabId);
             chrome.tabs.sendMessage(tabId, {
               action: 'jobMobilityUpdate',
               success: false,
@@ -508,6 +578,7 @@ async function pollJobMobilityStatus(token, responseId, tabId) {
       if (attempts >= maxAttempts) {
         clearInterval(pollInterval);
         if (tabId) {
+          mobilityFetchInProgress.delete(tabId);
           chrome.tabs.sendMessage(tabId, {
             action: 'jobMobilityUpdate',
             success: false,
