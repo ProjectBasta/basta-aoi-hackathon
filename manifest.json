@@ -15,7 +15,8 @@
     "https://*.indeed.com/*",
     "https://*.joinhandshake.com/*",
     "https://*.app.joinhandshake.com/*",
-    "https://staging-seekr-adaptive-api.projectbasta.com/*"
+    "https://staging-seekr-adaptive-api.projectbasta.com/*",
+    "https://aoi-hackathon.projectbasta.com/*"
   ],
   "content_scripts": [
     {

@@ -726,7 +726,7 @@
   const SIDEBAR_ID = 'basta-job-assistant-sidebar';
   let sidebarInitialized = false;
 
-  function createSidebarHTML(jobData) {
+  function createSidebarHTML(jobData, mobilityData) {
     if (!jobData || (!jobData.jobTitle && !jobData.companyName)) {
       return `
         <div class="basta-sidebar-empty">
@@ -735,34 +735,168 @@
       `;
     }
 
+    const companyName = escapeHtml(jobData.companyName || 'Not available');
+    const companyLink = jobData.companyName 
+      ? `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(jobData.companyName)}`
+      : '';
+
+    // Show company and title immediately, rest with spinner if mobility data is loading
+    const showSpinner = !mobilityData || mobilityData.status === 'in_progress';
+    
+    let mobilityHTML = '';
+    if (mobilityData && mobilityData.status === 'completed') {
+      mobilityHTML = createMobilityHTML(mobilityData, companyName, companyLink);
+    } else if (showSpinner) {
+      mobilityHTML = '<div class="basta-sidebar-spinner">Loading job mobility data...</div>';
+    }
+
     return `
       <div class="basta-sidebar-content">
         <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Job Title</div>
+          <div class="basta-sidebar-label">Company</div>
+          <div class="basta-sidebar-value">
+            ${companyLink ? `<a href="${companyLink}" target="_blank" class="basta-company-link">${companyName}</a>` : companyName}
+          </div>
+        </div>
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Title</div>
           <div class="basta-sidebar-value">${escapeHtml(jobData.jobTitle || 'Not available')}</div>
         </div>
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Company Name</div>
-          <div class="basta-sidebar-value">${escapeHtml(jobData.companyName || 'Not available')}</div>
-        </div>
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Job Description</div>
-          <div class="basta-sidebar-value basta-sidebar-description">${escapeHtml(jobData.jobDescription || 'Not available')}</div>
-        </div>
-        ${jobData.location ? `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Location</div>
-          <div class="basta-sidebar-value">${escapeHtml(jobData.location)}</div>
-        </div>
-        ` : ''}
-        ${jobData.compensation ? `
-        <div class="basta-sidebar-field">
-          <div class="basta-sidebar-label">Compensation</div>
-          <div class="basta-sidebar-value">${escapeHtml(jobData.compensation)}</div>
-        </div>
-        ` : ''}
+        ${mobilityHTML}
       </div>
     `;
+  }
+
+  function createMobilityHTML(mobilityData, companyName, companyLink) {
+    const data = mobilityData.job_mobility || {};
+    let html = '';
+
+    if (data.primary_industry) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Industry</div>
+          <div class="basta-sidebar-value">${escapeHtml(data.primary_industry)}</div>
+        </div>
+      `;
+    }
+
+    if (data.skills && data.skills.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Required Skills</div>
+          <div class="basta-sidebar-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.education) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Required Education</div>
+          <div class="basta-sidebar-value">${escapeHtml(data.education)}</div>
+        </div>
+      `;
+    }
+
+    if (data.wage) {
+      const wage = data.wage;
+      const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
+      const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
+      const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Compensation</div>
+          <div class="basta-sidebar-value">Low ${low} Median ${median} High ${high}</div>
+        </div>
+      `;
+    }
+
+    if (data.overall_badge || data.badge_early_career || data.badge_growth || data.badge_stability) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Badges</div>
+          <div class="basta-sidebar-value">
+            Overall ${escapeHtml(data.overall_badge || 'N/A')} 
+            Early Career ${escapeHtml(data.badge_early_career || 'N/A')} 
+            Growth ${escapeHtml(data.badge_growth || 'N/A')} 
+            Stability ${escapeHtml(data.badge_stability || 'N/A')}
+          </div>
+      </div>
+    `;
+    }
+
+    if (data.badge_early_career_company && data.badge_early_career_company.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Early Career Companies</div>
+          <div class="basta-sidebar-value">${data.badge_early_career_company.map(c => escapeHtml(c)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.badge_growth_company && data.badge_growth_company.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Growth Companies</div>
+          <div class="basta-sidebar-value">${data.badge_growth_company.map(c => escapeHtml(c)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.badge_stability_company && data.badge_stability_company.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Stability Companies</div>
+          <div class="basta-sidebar-value">${data.badge_stability_company.map(c => escapeHtml(c)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.pathways && data.pathways.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Pathways</div>
+          <div class="basta-sidebar-value">${data.pathways.map(p => escapeHtml(p)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.recommendation) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Recommendation</div>
+          <div class="basta-sidebar-value">${escapeHtml(data.recommendation)}</div>
+        </div>
+      `;
+    }
+
+    if (data.works && data.works.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">What works well!</div>
+          <div class="basta-sidebar-value">
+            <ul class="basta-sidebar-list">
+              ${data.works.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    if (data.consider && data.consider.length > 0) {
+      html += `
+        <div class="basta-sidebar-field">
+          <div class="basta-sidebar-label">Things to consider</div>
+          <div class="basta-sidebar-value">
+            <ul class="basta-sidebar-list">
+              ${data.consider.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    return html;
   }
 
   function injectSidebarStyles() {
@@ -796,6 +930,52 @@
         font-size: 18px;
         font-weight: 600;
         border-bottom: 2px solid #131F39;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        position: relative;
+      }
+
+      #${SIDEBAR_ID} .basta-sidebar-toggle-btn {
+        background-color: transparent;
+        border: 2px solid white;
+        color: white;
+        cursor: pointer;
+        padding: 6px 12px;
+        font-size: 14px;
+        border-radius: 4px;
+        transition: all 0.2s ease;
+        position: absolute;
+        left: 20px;
+      }
+
+      #${SIDEBAR_ID} .basta-sidebar-toggle-btn:hover {
+        background-color: rgba(255, 255, 255, 0.1);
+      }
+
+      #${SIDEBAR_ID}.basta-sidebar-hidden {
+        transform: translateX(100%);
+        transition: transform 0.3s ease;
+      }
+
+      #${SIDEBAR_ID}.basta-sidebar-hidden .basta-sidebar-toggle-btn {
+        position: fixed !important;
+        right: 0 !important;
+        top: 20px !important;
+        z-index: 1000000 !important;
+        background-color: #131F39 !important;
+        border: 2px solid #131F39 !important;
+        border-right: none !important;
+        border-radius: 4px 0 0 4px !important;
+        padding: 10px 8px !important;
+        transform: translateX(0) !important;
+        width: auto !important;
+        height: auto !important;
+      }
+
+      #${SIDEBAR_ID}.basta-sidebar-hidden .basta-sidebar-toggle-btn:hover {
+        background-color: #1a2a4a;
       }
 
       #${SIDEBAR_ID} .basta-sidebar-content {
@@ -850,8 +1030,52 @@
         font-size: 14px;
       }
 
+      #${SIDEBAR_ID} .basta-sidebar-spinner {
+        padding: 20px;
+        text-align: center;
+        color: #111928;
+        font-size: 14px;
+      }
+
+      #${SIDEBAR_ID} .basta-sidebar-spinner::after {
+        content: '';
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid #f3f3f3;
+        border-top: 3px solid #131F39;
+        border-radius: 50%;
+        animation: spin 1s linear infinite;
+        margin-left: 10px;
+        vertical-align: middle;
+      }
+
+      @keyframes spin {
+        0% { transform: rotate(0deg); }
+        100% { transform: rotate(360deg); }
+      }
+
+      #${SIDEBAR_ID} .basta-company-link {
+        color: #131F39;
+        text-decoration: none;
+        font-weight: 600;
+      }
+
+      #${SIDEBAR_ID} .basta-company-link:hover {
+        text-decoration: underline;
+      }
+
+      #${SIDEBAR_ID} .basta-sidebar-list {
+        margin: 8px 0;
+        padding-left: 20px;
+      }
+
+      #${SIDEBAR_ID} .basta-sidebar-list li {
+        margin-bottom: 4px;
+      }
+
       /* Adjust body margin to prevent content overlap */
-      body.basta-sidebar-active {
+      body.basta-sidebar-active:not(.basta-sidebar-hidden-body) {
         margin-right: 350px;
       }
     `;
@@ -875,6 +1099,15 @@
 
       // If sidebar already exists and user is logged in, just update content
       if (existingSidebar) {
+        // Ensure toggle button has event listener
+        const toggleBtn = existingSidebar.querySelector('#basta-sidebar-toggle');
+        if (toggleBtn && !toggleBtn.hasAttribute('data-listener-attached')) {
+          toggleBtn.setAttribute('data-listener-attached', 'true');
+          toggleBtn.addEventListener('click', () => {
+            const isHidden = existingSidebar.classList.contains('basta-sidebar-hidden');
+            toggleSidebar(!isHidden, true);
+          });
+        }
         loadSidebarContent();
         return;
       }
@@ -886,7 +1119,10 @@
       const sidebar = document.createElement('div');
       sidebar.id = SIDEBAR_ID;
       sidebar.innerHTML = `
-        <div class="basta-sidebar-header">Basta Job Assistant</div>
+        <div class="basta-sidebar-header">
+          <button class="basta-sidebar-toggle-btn" id="basta-sidebar-toggle" title="Toggle Sidebar">☰</button>
+          <span>Basta Job Assistant</span>
+        </div>
         <div class="basta-sidebar-body">
           <div class="basta-sidebar-loading">Loading job information...</div>
         </div>
@@ -896,9 +1132,53 @@
       document.body.appendChild(sidebar);
       document.body.classList.add('basta-sidebar-active');
 
+      // Load sidebar visibility state
+      chrome.storage.local.get(['sidebarVisible'], (result) => {
+        const isVisible = result.sidebarVisible !== false; // Default to visible
+        toggleSidebar(isVisible, false); // false = don't save state yet
+      });
+
+      // Add toggle button event listener
+      const toggleBtn = sidebar.querySelector('#basta-sidebar-toggle');
+      if (toggleBtn) {
+        toggleBtn.addEventListener('click', () => {
+          const isHidden = sidebar.classList.contains('basta-sidebar-hidden');
+          toggleSidebar(!isHidden, true); // true = save state
+        });
+      }
+
       // Load and display job info
       loadSidebarContent();
     });
+  }
+
+  function toggleSidebar(isVisible, saveState) {
+    const sidebar = document.getElementById(SIDEBAR_ID);
+    if (!sidebar) return;
+
+    const toggleBtn = sidebar.querySelector('#basta-sidebar-toggle');
+    
+    if (isVisible) {
+      sidebar.classList.remove('basta-sidebar-hidden');
+      document.body.classList.remove('basta-sidebar-hidden-body');
+      document.body.classList.add('basta-sidebar-active');
+      if (toggleBtn) {
+        toggleBtn.textContent = '☰';
+        toggleBtn.title = 'Hide Sidebar';
+      }
+    } else {
+      sidebar.classList.add('basta-sidebar-hidden');
+      document.body.classList.add('basta-sidebar-hidden-body');
+      document.body.classList.remove('basta-sidebar-active');
+      if (toggleBtn) {
+        toggleBtn.textContent = '☰';
+        toggleBtn.title = 'Show Sidebar';
+      }
+    }
+
+    if (saveState) {
+      chrome.storage.local.set({ sidebarVisible: isVisible });
+    }
   }
 
   function loadSidebarContent() {
@@ -920,7 +1200,14 @@
 
       // Check if response has valid job information
       if (response && (response.jobTitle || response.companyName)) {
-        bodyElement.innerHTML = createSidebarHTML(response);
+        // Show company and title immediately with spinner
+        bodyElement.innerHTML = createSidebarHTML(response, { status: 'in_progress' });
+        
+        // Trigger API call for job mobility
+        chrome.runtime.sendMessage({
+          action: 'fetchJobMobility',
+          jobData: response
+        });
       } else {
         bodyElement.innerHTML = `
           <div class="basta-sidebar-empty">
@@ -989,6 +1276,30 @@
       const jobData = extractJobInfo();
       sendResponse({ success: true, data: jobData });
       return true; // Indicates we will send a response asynchronously
+    }
+
+    if (request.action === 'jobMobilityUpdate') {
+      // Update sidebar with mobility data
+      const sidebar = document.getElementById(SIDEBAR_ID);
+      if (!sidebar) return;
+
+      const bodyElement = sidebar.querySelector('.basta-sidebar-body');
+      if (!bodyElement) return;
+
+      // Get current job data
+      chrome.runtime.sendMessage({ action: 'getJobInfo' }, (jobResponse) => {
+        if (jobResponse && (jobResponse.jobTitle || jobResponse.companyName)) {
+          if (request.success && request.data) {
+            bodyElement.innerHTML = createSidebarHTML(jobResponse, request.data);
+          } else {
+            // Show error or keep spinner
+            if (request.error) {
+              bodyElement.innerHTML = createSidebarHTML(jobResponse, { status: 'in_progress' }) + 
+                `<div class="basta-sidebar-error" style="padding: 10px; color: #d32f2f; font-size: 12px;">Error: ${escapeHtml(request.error)}</div>`;
+            }
+          }
+        }
+      });
     }
   });
 

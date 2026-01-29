@@ -225,52 +225,218 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   function loadJobInfo() {
-    chrome.runtime.sendMessage({ action: 'getJobInfo' }, (response) => {
-      if (chrome.runtime.lastError) {
-        console.error('Error loading job info:', chrome.runtime.lastError);
-        displayNoJobInfo();
-        return;
-      }
+    chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+      const activeTabId = tabs.length > 0 ? tabs[0].id : null;
 
-      // Check if response has valid job information
-      if (response && (response.jobTitle || response.companyName)) {
-        displayJobInfo(response);
-      } else {
-        // No job info for current tab
-        displayNoJobInfo();
-      }
+      // Get job info
+      chrome.runtime.sendMessage({ action: 'getJobInfo' }, (jobResponse) => {
+        if (chrome.runtime.lastError) {
+          console.error('Error loading job info:', chrome.runtime.lastError);
+          displayNoJobInfo();
+          return;
+        }
+
+        // Get mobility data for this tab or fallback to lastJobMobility
+        chrome.storage.local.get(['jobMobilityByTab', 'lastJobMobility'], (result) => {
+          let mobilityData = null;
+          if (activeTabId) {
+            const jobMobilityByTab = result.jobMobilityByTab || {};
+            mobilityData = jobMobilityByTab[activeTabId];
+          }
+          // Fallback to lastJobMobility if no tab-specific data
+          if (!mobilityData && result.lastJobMobility) {
+            mobilityData = result.lastJobMobility;
+          }
+
+          // Check if response has valid job information
+          if (jobResponse && (jobResponse.jobTitle || jobResponse.companyName)) {
+            displayJobInfo(jobResponse, mobilityData);
+          } else {
+            // No job info for current tab
+            displayNoJobInfo();
+          }
+        });
+      });
     });
   }
 
-  function displayJobInfo(jobData) {
-    const html = `
+  function displayJobInfo(jobData, mobilityData) {
+    const companyName = escapeHtml(jobData.companyName || 'Not available');
+    const companyLink = jobData.companyName 
+      ? `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(jobData.companyName)}`
+      : '';
+
+    let html = `
       <div class="job-field">
-        <div class="job-field-label">Job Title</div>
+        <div class="job-field-label">Company</div>
+        <div class="job-field-value">
+          ${companyLink ? `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>` : companyName}
+      </div>
+      </div>
+      <div class="job-field">
+        <div class="job-field-label">Title</div>
         <div class="job-field-value">${escapeHtml(jobData.jobTitle || 'Not available')}</div>
       </div>
-      <div class="job-field">
-        <div class="job-field-label">Company Name</div>
-        <div class="job-field-value">${escapeHtml(jobData.companyName || 'Not available')}</div>
-      </div>
-      <div class="job-field">
-        <div class="job-field-label">Job Description</div>
-        <div class="job-field-value description">${escapeHtml(jobData.jobDescription || 'Not available')}</div>
-      </div>
-      ${jobData.location ? `
-      <div class="job-field">
-        <div class="job-field-label">Location</div>
-        <div class="job-field-value">${escapeHtml(jobData.location)}</div>
-      </div>
-      ` : ''}
-      ${jobData.compensation ? `
-      <div class="job-field">
-        <div class="job-field-label">Compensation</div>
-        <div class="job-field-value">${escapeHtml(jobData.compensation)}</div>
-      </div>
-      ` : ''}
     `;
+
+    // Show spinner if mobility data is loading
+    if (!mobilityData || mobilityData.status === 'in_progress') {
+      html += `
+        <div class="job-field" style="text-align: center; padding: 20px;">
+          <div style="display: inline-block; width: 20px; height: 20px; border: 3px solid #f3f3f3; border-top: 3px solid #131F39; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+          <div style="margin-top: 10px; color: #666;">Loading job mobility data...</div>
+        </div>
+      `;
+    } else if (mobilityData && mobilityData.job_mobility) {
+      // Show mobility data
+      html += createMobilityHTML(mobilityData.job_mobility, companyName, companyLink);
+    }
+
     jobInfoContainer.innerHTML = html;
     jobInfoContainer.classList.remove('empty', 'loading');
+
+    // Trigger API call for job mobility if not already loaded
+    if (!mobilityData || mobilityData.status !== 'completed') {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs.length > 0) {
+          chrome.runtime.sendMessage({
+            action: 'fetchJobMobility',
+            jobData: jobData
+          });
+        }
+      });
+    }
+  }
+
+  function createMobilityHTML(data, companyName, companyLink) {
+    let html = '';
+
+    if (data.primary_industry) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Industry</div>
+          <div class="job-field-value">${escapeHtml(data.primary_industry)}</div>
+        </div>
+      `;
+    }
+
+    if (data.skills && data.skills.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Required Skills</div>
+          <div class="job-field-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.education) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Required Education</div>
+          <div class="job-field-value">${escapeHtml(data.education)}</div>
+        </div>
+      `;
+    }
+
+    if (data.wage) {
+      const wage = data.wage;
+      const low = wage.percentile_25 ? `$${Math.round(wage.percentile_25).toLocaleString()}` : '';
+      const median = wage.median ? `$${Math.round(wage.median).toLocaleString()}` : '';
+      const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Compensation</div>
+          <div class="job-field-value">Low ${low} Median ${median} High ${high}</div>
+        </div>
+      `;
+    }
+
+    if (data.overall_badge || data.badge_early_career || data.badge_growth || data.badge_stability) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Badges</div>
+          <div class="job-field-value">
+            Overall ${escapeHtml(data.overall_badge || 'N/A')} 
+            Early Career ${escapeHtml(data.badge_early_career || 'N/A')} 
+            Growth ${escapeHtml(data.badge_growth || 'N/A')} 
+            Stability ${escapeHtml(data.badge_stability || 'N/A')}
+          </div>
+        </div>
+      `;
+    }
+
+    if (data.badge_early_career_company && data.badge_early_career_company.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Early Career Companies</div>
+          <div class="job-field-value">${data.badge_early_career_company.map(c => escapeHtml(c)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.badge_growth_company && data.badge_growth_company.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Growth Companies</div>
+          <div class="job-field-value">${data.badge_growth_company.map(c => escapeHtml(c)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.badge_stability_company && data.badge_stability_company.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Stability Companies</div>
+          <div class="job-field-value">${data.badge_stability_company.map(c => escapeHtml(c)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.pathways && data.pathways.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Pathways</div>
+          <div class="job-field-value">${data.pathways.map(p => escapeHtml(p)).join(', ')}</div>
+        </div>
+      `;
+    }
+
+    if (data.recommendation) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Recommendation</div>
+          <div class="job-field-value">${escapeHtml(data.recommendation)}</div>
+        </div>
+      `;
+    }
+
+    if (data.works && data.works.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">What works well!</div>
+          <div class="job-field-value">
+            <ul style="margin: 8px 0; padding-left: 20px;">
+              ${data.works.map(w => `<li>${escapeHtml(w)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    if (data.consider && data.consider.length > 0) {
+      html += `
+        <div class="job-field">
+          <div class="job-field-label">Things to consider</div>
+          <div class="job-field-value">
+            <ul style="margin: 8px 0; padding-left: 20px;">
+              ${data.consider.map(c => `<li>${escapeHtml(c)}</li>`).join('')}
+            </ul>
+          </div>
+        </div>
+      `;
+    }
+
+    return html;
   }
 
   function displayNoJobInfo() {
@@ -310,8 +476,8 @@ document.addEventListener('DOMContentLoaded', () => {
       
       // Only update job info if logged in
       if (jobInfoScreen.style.display !== 'none') {
-        if (changes.jobInfoByTab) {
-          // Job info for a tab was updated, reload to get current tab's info
+        if (changes.jobInfoByTab || changes.jobMobilityByTab) {
+          // Job info or mobility data for a tab was updated, reload to get current tab's info
           loadJobInfo();
         } else if (changes.lastJobInfo) {
           // Fallback: check if it's for the current tab

@@ -308,6 +308,199 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
   }
+
+  if (request.action === 'fetchJobMobility') {
+    // Handle job mobility API call
+    // Get tab ID from sender or from active tab
+    let tabId = sender.tab?.id;
+    if (!tabId) {
+      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+        if (tabs.length > 0) {
+          fetchJobMobility(request.jobData, tabs[0].id);
+        } else {
+          fetchJobMobility(request.jobData, null);
+        }
+      });
+    } else {
+      fetchJobMobility(request.jobData, tabId);
+    }
+    sendResponse({ success: true, message: 'Job mobility fetch initiated' });
+    return true; // Indicates we will send a response asynchronously
+  }
 });
+
+// Generate UUID for user_id and response_id
+function generateUUID() {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
+
+// Extract numeric value from compensation string
+function extractCompensationValue(compensation) {
+  if (!compensation) return '';
+  
+  // Remove currency symbols and extract numbers
+  const match = compensation.match(/[\d,]+/);
+  if (match) {
+    return match[0].replace(/,/g, '');
+  }
+  return '';
+}
+
+// Parse location value from location string
+function parseLocationValue(location) {
+  if (!location) return { value: '' };
+  return { value: location };
+}
+
+// Fetch job mobility data
+async function fetchJobMobility(jobData, tabId) {
+  try {
+    // Get user_id from storage or generate one
+    const storage = await chrome.storage.local.get(['userId']);
+    let userId = storage.userId;
+    if (!userId) {
+      userId = generateUUID();
+      await chrome.storage.local.set({ userId });
+    }
+
+    const responseId = generateUUID();
+
+    // Prepare request payload
+    const payload = {
+      user_id: userId,
+      response_id: responseId,
+      job_information: {
+        title: jobData.jobTitle || '',
+        location: parseLocationValue(jobData.location),
+        description: jobData.jobDescription || '',
+        compensation: extractCompensationValue(jobData.compensation),
+        company: jobData.companyName || ''
+      }
+    };
+
+    // Make initial API call to get token
+    const response = await fetch('https://aoi-hackathon.projectbasta.com/job/mobility', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (!response.ok) {
+      throw new Error(`API call failed: ${response.statusText}`);
+    }
+
+    const responseData = await response.json();
+    
+    if (!responseData.success || !responseData.data || !responseData.data.token) {
+      throw new Error(responseData.message || 'Failed to get token');
+    }
+
+    const token = responseData.data.token;
+
+    // Poll for job mobility status
+    pollJobMobilityStatus(token, responseId, tabId);
+  } catch (error) {
+    console.error('Error fetching job mobility:', error);
+    // Send error message to content script
+    if (tabId) {
+      chrome.tabs.sendMessage(tabId, {
+        action: 'jobMobilityUpdate',
+        success: false,
+        error: error.message
+      }).catch(() => {}); // Ignore errors if tab is closed
+    }
+  }
+}
+
+// Poll job mobility status
+async function pollJobMobilityStatus(token, responseId, tabId) {
+  const maxAttempts = 10;
+  let attempts = 0;
+  let pollInterval;
+
+  const poll = async () => {
+    attempts++;
+    
+    try {
+      const response = await fetch(`https://aoi-hackathon.projectbasta.com/job/mobility?token=${encodeURIComponent(token)}&response_id=${encodeURIComponent(responseId)}`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        throw new Error(`Polling failed: ${response.statusText}`);
+      }
+
+      const responseData = await response.json();
+      
+      if (responseData.success && responseData.data) {
+        const mobilityData = responseData.data;
+        
+        // Store mobility data in storage for popup access
+        if (tabId) {
+          chrome.storage.local.get(['jobMobilityByTab'], (result) => {
+            const jobMobilityByTab = result.jobMobilityByTab || {};
+            jobMobilityByTab[tabId] = mobilityData;
+            chrome.storage.local.set({ jobMobilityByTab });
+          });
+          
+          // Send update to content script
+          chrome.tabs.sendMessage(tabId, {
+            action: 'jobMobilityUpdate',
+            success: true,
+            data: mobilityData,
+            status: mobilityData.job_mobility?.status || 'in_progress'
+          }).catch(() => {}); // Ignore errors if tab is closed
+        } else {
+          // No tab ID, store as last mobility data for popup
+          chrome.storage.local.set({ lastJobMobility: mobilityData });
+        }
+
+        // If status is completed or max attempts reached, stop polling
+        if (mobilityData.job_mobility?.status === 'completed' || attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          return;
+        }
+      } else {
+        // If we've reached max attempts, stop polling
+        if (attempts >= maxAttempts) {
+          clearInterval(pollInterval);
+          if (tabId) {
+            chrome.tabs.sendMessage(tabId, {
+              action: 'jobMobilityUpdate',
+              success: false,
+              error: 'Max polling attempts reached'
+            }).catch(() => {}); // Ignore errors if tab is closed
+          }
+          return;
+        }
+      }
+    } catch (error) {
+      console.error('Error polling job mobility:', error);
+      if (attempts >= maxAttempts) {
+        clearInterval(pollInterval);
+        if (tabId) {
+          chrome.tabs.sendMessage(tabId, {
+            action: 'jobMobilityUpdate',
+            success: false,
+            error: error.message
+          }).catch(() => {}); // Ignore errors if tab is closed
+        }
+      }
+    }
+  };
+
+  // Start polling immediately, then every 2 seconds
+  poll();
+  pollInterval = setInterval(poll, 2000);
+}
 
 
