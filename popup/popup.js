@@ -326,17 +326,8 @@ document.addEventListener('DOMContentLoaded', () => {
     jobInfoContainer.innerHTML = html;
     jobInfoContainer.classList.remove('empty', 'loading');
 
-    // Trigger API call for job mobility if not already loaded
-    if (!mobilityData || mobilityData.status !== 'completed') {
-      chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-        if (tabs.length > 0) {
-          chrome.runtime.sendMessage({
-            action: 'fetchJobMobility',
-            jobData: jobData
-          });
-        }
-      });
-    }
+    // Don't trigger API call from popup - let the content script handle it on page load
+    // The API call should only happen when the page is first loaded/refreshed
   }
 
   function createMobilityHTML(data, companyName, companyLink) {
@@ -354,7 +345,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.skills && data.skills.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Required Skills</div>
+          <div class="job-field-label">Required: Skills</div>
           <div class="job-field-value">${data.skills.map(skill => escapeHtml(skill)).join(', ')}</div>
         </div>
       `;
@@ -363,7 +354,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.education) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Required Education</div>
+          <div class="job-field-label">Required Education:</div>
           <div class="job-field-value">${escapeHtml(data.education)}</div>
         </div>
       `;
@@ -376,8 +367,8 @@ document.addEventListener('DOMContentLoaded', () => {
       const high = wage.percentile_75 ? `$${Math.round(wage.percentile_75).toLocaleString()}` : '';
       html += `
         <div class="job-field">
-          <div class="job-field-label">Compensation</div>
-          <div class="job-field-value">Low ${low} Median ${median} High ${high}</div>
+          <div class="job-field-label">Compensation:</div>
+          <div class="job-field-value">Low${low}  Median ${median}  High ${high}</div>
         </div>
       `;
     }
@@ -385,11 +376,11 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.overall_badge || data.badge_early_career || data.badge_growth || data.badge_stability) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Badges</div>
+          <div class="job-field-label">Badges:</div>
           <div class="job-field-value">
-            Overall ${escapeHtml(data.overall_badge || 'N/A')} 
-            Early Career ${escapeHtml(data.badge_early_career || 'N/A')} 
-            Growth ${escapeHtml(data.badge_growth || 'N/A')} 
+            Overall ${escapeHtml(data.overall_badge || 'N/A')}<br>
+            Early Career ${escapeHtml(data.badge_early_career || 'N/A')}<br>
+            Growth ${escapeHtml(data.badge_growth || 'N/A')}<br>
             Stability ${escapeHtml(data.badge_stability || 'N/A')}
           </div>
         </div>
@@ -399,8 +390,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.badge_early_career_company && data.badge_early_career_company.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Early Career Companies</div>
-          <div class="job-field-value">${data.badge_early_career_company.map(c => escapeHtml(c)).join(', ')}</div>
+          <div class="job-field-label">Early Career Companies:</div>
+          <div class="job-field-value">${data.badge_early_career_company.map(c => {
+            const companyName = escapeHtml(c);
+            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+            return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+          }).join(', ')}</div>
         </div>
       `;
     }
@@ -408,8 +403,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.badge_growth_company && data.badge_growth_company.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Growth Companies</div>
-          <div class="job-field-value">${data.badge_growth_company.map(c => escapeHtml(c)).join(', ')}</div>
+          <div class="job-field-label">Growth Companies:</div>
+          <div class="job-field-value">${data.badge_growth_company.map(c => {
+            const companyName = escapeHtml(c);
+            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+            return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+          }).join(', ')}</div>
         </div>
       `;
     }
@@ -417,8 +416,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.badge_stability_company && data.badge_stability_company.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Stability Companies</div>
-          <div class="job-field-value">${data.badge_stability_company.map(c => escapeHtml(c)).join(', ')}</div>
+          <div class="job-field-label">Stability Companies:</div>
+          <div class="job-field-value">${data.badge_stability_company.map(c => {
+            const companyName = escapeHtml(c);
+            const companyLink = `https://www.linkedin.com/search/results/companies/?keywords=${encodeURIComponent(c)}`;
+            return `<a href="${companyLink}" target="_blank" style="color: #131F39; text-decoration: none; font-weight: 600;">${companyName}</a>`;
+          }).join(', ')}</div>
         </div>
       `;
     }
@@ -426,7 +429,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.pathways && data.pathways.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Pathways</div>
+          <div class="job-field-label">Pathways:</div>
           <div class="job-field-value">${data.pathways.map(p => escapeHtml(p)).join(', ')}</div>
         </div>
       `;
@@ -435,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.recommendation) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">Recommendation</div>
+          <div class="job-field-label">Recommendation:</div>
           <div class="job-field-value">${escapeHtml(data.recommendation)}</div>
         </div>
       `;
@@ -444,7 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (data.works && data.works.length > 0) {
       html += `
         <div class="job-field">
-          <div class="job-field-label">What works well!</div>
+          <div class="job-field-label">What works well !</div>
           <div class="job-field-value">
             <ul style="margin: 8px 0; padding-left: 20px;">
               ${data.works.map(w => `<li>${escapeHtml(w)}</li>`).join('')}

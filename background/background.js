@@ -129,22 +129,8 @@ function saveJobInfoForTab(tabId, jobData) {
 
 // Listen for tab activation (when user switches tabs)
 chrome.tabs.onActivated.addListener((activeInfo) => {
-  // Update badge for the newly active tab
+  // Update badge for the newly active tab (but don't parse or make API calls)
   updateBadgeForTab(activeInfo.tabId);
-  
-  chrome.tabs.get(activeInfo.tabId, (tab) => {
-    if (chrome.runtime.lastError) return;
-    
-    if (tab && tab.url && isSupportedJobBoard(tab.url)) {
-      // Wait a bit for the page to be ready
-      setTimeout(() => {
-        parseJobFromTab(activeInfo.tabId);
-      }, 500);
-    } else {
-      // Not a job board, set badge to default for this tab
-      setBadgeDefault(activeInfo.tabId);
-    }
-  });
 });
 
 // Listen for tab updates (when URL changes in a tab)
